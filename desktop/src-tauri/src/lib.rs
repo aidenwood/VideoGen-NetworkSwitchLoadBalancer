@@ -239,14 +239,14 @@ pub fn run() {
             let show = MenuItem::with_id(app, "show", "Open dashboard", true, None::<&str>)?;
             let openf = MenuItem::with_id(app, "open_folder", "Reveal farm folder", true, None::<&str>)?;
             let sep = PredefinedMenuItem::separator(app)?;
-            let quit = PredefinedMenuItem::quit(app, Some("Quit FarmMon"))?;
+            let quit = PredefinedMenuItem::quit(app, Some("Quit LTX Mac Farm"))?;
             let menu = Menu::with_items(app, &[&show, &openf, &sep, &quit])?;
 
             let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?;
             let _tray = TrayIconBuilder::with_id("main")
                 .icon(icon)
                 .icon_as_template(true)
-                .tooltip("Render Farm")
+                .tooltip("LTX Mac Farm")
                 .menu(&menu)
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "show" => {
@@ -266,5 +266,5 @@ pub fn run() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running FarmMon");
+        .expect("error while running LTX Mac Farm");
 }

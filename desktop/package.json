@@ -1,8 +1,8 @@
 {
-  "name": "farmmon",
+  "name": "ltx-mac-farm",
   "private": true,
   "version": "0.1.0",
-  "description": "Render Farm menubar monitor — tray status + ping notifications",
+  "description": "LTX Mac Farm — menubar monitor: tray status + ping notifications",
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",

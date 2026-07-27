@@ -1,4 +1,4 @@
-# FarmMon — render-farm menubar app
+# LTX Mac Farm — render-farm menubar app
 
 A native macOS menubar app (Tauri v2) that watches the shared farm folder and gives
 you **live tray status + notification sounds** when pings move through the farm — so
@@ -28,16 +28,16 @@ is bulletproof across the network.
 cd desktop
 npm install
 npm run tauri dev      # run live
-npm run tauri build    # -> src-tauri/target/release/bundle/macos/FarmMon.app (+ .dmg)
+npm run tauri build    # -> src-tauri/target/release/bundle/macos/"LTX Mac Farm.app" (+ .dmg)
 ```
 
 Point it at your share with `FARM_ROOT` (defaults to `/Volumes/RenderFarm`):
 
 ```bash
-FARM_ROOT=/Volumes/RenderFarm open -a FarmMon
+FARM_ROOT=/Volumes/RenderFarm open -a "LTX Mac Farm"
 ```
 
-Ship the built `FarmMon.app` to each teammate's `/Applications` and it runs in their
+Ship the built `LTX Mac Farm.app` to each teammate's `/Applications` and it runs in their
 menubar. First launch may ask to allow Notifications — say yes.
 
 ## Layout

@@ -1,0 +1,17 @@
+# Sample job file. Workers `source` this, so it's plain KEY=value shell.
+# Use enqueue.sh to create these (it timestamps + drops them in queue/).
+ID="demo_dragon"          # output becomes done/demo_dragon.mp4
+TYPE="t2v"                # t2v | i2v | lora_i2v
+PROMPT="a black dragon perched on a metal rooftop at dusk, cinematic"
+IMAGE=""                  # i2v: filename in assets/ (or absolute path)
+LORA=""                   # lora_i2v: safetensors in LORA_DIR, e.g. Elijah_lora.safetensors
+LORA_SCALE=1.0
+STILL_PROMPT=""           # lora_i2v: prompt for the still (defaults to PROMPT). Use the trigger word, e.g. "eljhwd man ..."
+WIDTH=1080
+HEIGHT=1920
+FRAMES=97                 # MUST be 8k+1  (9, 25, 33, ... 97)
+SEED=42
+FPS=24
+MODE="hero"               # hero = full video | test = quick z-image still to cherry-pick
+EXTRA=""                  # extra ltx-2-mlx flags, verbatim
+# PERF="light"            # optional per-job override (full | light). Omit to use the worker's default.

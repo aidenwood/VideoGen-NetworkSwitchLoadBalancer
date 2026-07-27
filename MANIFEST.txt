@@ -1,0 +1,15 @@
+# FARM MANIFEST — the exact models + extras every worker Mac must have.
+# Single source of truth. seed_farm_assets.sh reads this to stage onto the share;
+# provision.command reads it to pull onto each worker. Edit here, everyone stays in sync.
+#
+# Format:  KIND  SOURCE_PATH_ON_COORDINATOR  ->  local dest key
+# KIND is one of: HFMODEL (huggingface hub cache dir), LORA (safetensors file)
+
+# --- diffusion models (HF hub cache) --------------------------------------
+HFMODEL  ~/.cache/huggingface/hub/models--dgrauet--ltx-2.3-mlx-q4        # LTX-2.3 MLX q4 (video)
+HFMODEL  ~/.cache/huggingface/hub/models--Tongyi-MAI--Z-Image-Turbo      # Z-Image-Turbo (stills)
+
+# --- character LoRAs ------------------------------------------------------
+LORA  elijah-lora/Elijah_lora.safetensors     # trigger: "eljhwd man"
+# LORA  rhys-lora/Rhys_lora.safetensors        # uncomment once trained; trigger "rhyswd man"
+# LORA  ben-lora/Ben_lora.safetensors          # uncomment once trained; trigger "benwd man"

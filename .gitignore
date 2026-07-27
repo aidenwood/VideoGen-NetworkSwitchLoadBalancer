@@ -1,0 +1,17 @@
+# farm runtime dirs (these live on the shared volume, never in git)
+queue/
+running/
+done/
+failed/
+assets/
+models/
+loras/
+
+# tauri / node / rust build output
+desktop/node_modules/
+desktop/dist/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+
+# macOS
+.DS_Store

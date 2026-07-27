@@ -9,9 +9,16 @@ Built for a marketing team with 4× M4 Macs, but it scales to any number.
 > ### ⬇️ Download the menubar app
 > **[Get the latest LTX Mac Farm.app (.dmg) →](https://github.com/aidenwood/VideoGen-NetworkSwitchLoadBalancer/releases/latest)**
 >
-> Grab the `.dmg` from the latest release, drag **LTX Mac Farm** into `/Applications`, done.
+> Grab the `.dmg` from the latest release, open it, drag **LTX Mac Farm** into `/Applications`.
 > The app is the live status tray + ping sounds — the render scripts live in this repo.
-> First launch on an unsigned build: right-click the app → **Open** → **Open** to get past Gatekeeper.
+>
+> **First launch (the app isn't from the App Store, so macOS blocks it once):**
+> - If you see **"can't be opened / Apple could not verify…"** → **System Settings → Privacy & Security** → scroll down → **Open Anyway**.
+> - If macOS says the app is **"damaged"** (stricter on macOS 15/26), run this one line in **Terminal** — it just removes the download flag:
+>   ```bash
+>   xattr -dr com.apple.quarantine "/Applications/LTX Mac Farm.app"
+>   ```
+>   Then open it normally. You only ever do this once per Mac.
 
 ---
 

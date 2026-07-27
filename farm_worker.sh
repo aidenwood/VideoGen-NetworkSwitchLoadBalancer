@@ -43,6 +43,7 @@ LORA_DIR="${LORA_DIR:-$HOME/farm-loras}"          # local LoRAs (provision.comma
 MODEL="${MODEL:-dgrauet/ltx-2.3-mlx-q4}"
 PERF="${PERF:-full}"                               # per-worker default profile
 POLL_SECS="${POLL_SECS:-15}"
+MIN_FREE_GB="${MIN_FREE_GB:-15}"                   # pause rendering below this much free disk on $DONE volume
 HOST="$(scutil --get LocalHostName 2>/dev/null || hostname -s)"
 
 QUEUE="$FARM_ROOT/queue"; RUNNING="$FARM_ROOT/running"
@@ -51,13 +52,31 @@ ASSETS="$FARM_ROOT/assets"
 
 # --- preflight ------------------------------------------------------------
 [ -d "$FARM_ROOT" ] || { echo "!! FARM_ROOT not mounted: $FARM_ROOT — connect the share first."; exit 1; }
-mkdir -p "$QUEUE" "$RUNNING" "$DONE" "$FAILED" "$ASSETS"
+mkdir -p "$QUEUE" "$QUEUE/hi" "$RUNNING" "$DONE" "$FAILED" "$ASSETS"
 
 log(){ echo "[$(date +%H:%M:%S)][$HOST] $*"; }
 notify(){ osascript -e "display notification \"$1\" with title \"Render farm — $HOST\"" 2>/dev/null || true; }
 
 log "worker online. profile=$PERF  model=$MODEL  queue=$QUEUE"
 notify "worker online ($PERF)"
+
+# --- per-worker concurrency lock: enforce ONE GPU job per Mac --------------
+# Prefer the share (farm-wide visible), fall back to local tmp if the share
+# can't hold a lock (some SMB mounts choke on flock-style ops — we use a plain
+# PID file so it works either way).
+LOCKFILE="$RUNNING/.worker.$HOST.lock"
+if ! ( : > "$LOCKFILE" ) 2>/dev/null; then
+  LOCKFILE="${TMPDIR:-/tmp}/ltxfarm.$HOST.lock"
+fi
+if [ -f "$LOCKFILE" ]; then
+  oldpid="$(cat "$LOCKFILE" 2>/dev/null || true)"
+  if [ -n "$oldpid" ] && kill -0 "$oldpid" 2>/dev/null; then
+    log "!! another worker already running on $HOST — refusing to double-run (violates one-GPU-job rule)"
+    exit 1
+  fi
+  log "reclaiming stale lock (pid $oldpid not alive)"
+fi
+echo "$$" > "$LOCKFILE"
 
 # --- perf profile -> flags + nice level -----------------------------------
 # echoes:  "<nice>|<ltx extra flags>|<mflux extra flags>"
@@ -141,6 +160,8 @@ render(){
   fi
 
   # ---- LTX-2.3 MLX render (exact invocation from overnight_run.sh + perf) -
+  local _t0 _t1 _dur
+  _t0="$(date +%s)"
   ( cd "$LTX_DIR" && export HF_HUB_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 && \
     caffeinate -ims nice -n "$nice_l" uv run ltx-2-mlx generate \
       --model "$MODEL" --distilled $ltx_extra \
@@ -148,18 +169,80 @@ render(){
       -W "$WIDTH" -H "$HEIGHT" -f "$FRAMES" --frame-rate "$FPS" --seed "$SEED" \
       --prompt "$PROMPT" $EXTRA \
       -o "$out" )
+  local _rc=$?
+  [ $_rc -eq 0 ] || return $_rc
+  _t1="$(date +%s)"; _dur=$(( _t1 - _t0 ))
+
+  # ---- metadata sidecar (success only, real mp4 — never in test mode) -----
+  local _pj="${PROMPT//\\/\\\\}"; _pj="${_pj//\"/\\\"}"   # escape backslashes then quotes
+  {
+    printf '{\n'
+    printf '  "id": "%s",\n'       "$ID"
+    printf '  "mode": "%s",\n'     "$MODE"
+    printf '  "type": "%s",\n'     "$TYPE"
+    printf '  "prompt": "%s",\n'   "$_pj"
+    printf '  "seed": %s,\n'       "$SEED"
+    printf '  "model": "%s",\n'    "$MODEL"
+    printf '  "lora": "%s",\n'     "$LORA"
+    printf '  "width": %s,\n'      "$WIDTH"
+    printf '  "height": %s,\n'     "$HEIGHT"
+    printf '  "frames": %s,\n'     "$FRAMES"
+    printf '  "fps": %s,\n'        "$FPS"
+    printf '  "perf": "%s",\n'     "$PERF"
+    printf '  "worker": "%s",\n'   "$HOST"
+    printf '  "duration_secs": %s\n' "$_dur"
+    printf '}\n'
+  } > "$DONE/${ID}.json"
+  return 0
+}
+
+# --- disk guard: whole GB available on the volume holding $DONE -----------
+# macOS `df -g` -> avail is the 4th column, already in whole GB. If we can't
+# parse it, echo nothing and the caller proceeds (fail open, never block forever).
+free_gb(){
+  df -g "$DONE" 2>/dev/null | awk 'NR==2 {print $4}'
+}
+
+# --- heartbeat control: <claimed>.heartbeat touched every 30s -------------
+HB_PID=""
+start_heartbeat(){
+  local hb="${1}.heartbeat"
+  ( while :; do touch "$hb" 2>/dev/null; sleep 30; done ) &
+  HB_PID=$!
+}
+stop_heartbeat(){
+  [ -n "$HB_PID" ] && kill "$HB_PID" 2>/dev/null
+  wait "$HB_PID" 2>/dev/null || true
+  HB_PID=""
+  [ -n "${1:-}" ] && rm -f "${1}.heartbeat"
 }
 
 # --- main loop ------------------------------------------------------------
-trap 'log "worker stopping — an in-flight job stays in running/ and is requeued by farm_status.sh --reap"; exit 0' INT TERM
+trap 'log "worker stopping — an in-flight job stays in running/ and is requeued by farm_status.sh --reap"; stop_heartbeat "${claimed:-}"; rm -f "$LOCKFILE" 2>/dev/null; exit 0' INT TERM
+trap 'rm -f "$LOCKFILE" 2>/dev/null' EXIT
 while true; do
-  next="$(ls -1 "$QUEUE"/*.job 2>/dev/null | sort | head -n1 || true)"
+  # disk guard: bail before claiming if the $DONE volume is nearly full
+  avail_gb="$(free_gb)"
+  if [ -n "$avail_gb" ] && [ "$avail_gb" -lt "$MIN_FREE_GB" ] 2>/dev/null; then
+    log "!! low disk (<${avail_gb}GB free) — pausing"
+    notify "low disk (${avail_gb}GB) — paused"
+    sleep "$POLL_SECS"; continue
+  fi
+
+  # priority lane first, then the normal queue (the $QUEUE/*.job glob can't
+  # match the hi/ subdir, so no double-scan)
+  next="$(ls -1 "$QUEUE"/hi/*.job 2>/dev/null | sort | head -n1 || true)"
+  [ -z "$next" ] && next="$(ls -1 "$QUEUE"/*.job 2>/dev/null | sort | head -n1 || true)"
   [ -z "$next" ] && { sleep "$POLL_SECS"; continue; }
   claimed="$(claim "$next")" || continue        # lost the race, try next
   log "claimed $(basename "$claimed")"
+  start_heartbeat "$claimed"
   if render "$claimed"; then
+    stop_heartbeat "$claimed"
     mv "$claimed" "$DONE/$(basename "$claimed").ok"; log "✅ done -> $DONE"; notify "finished a clip"
   else
-    rc=$?; mv "$claimed" "$FAILED/$(basename "$claimed").rc${rc}"; log "❌ FAILED rc=$rc"; notify "job failed rc=$rc"
+    rc=$?; stop_heartbeat "$claimed"
+    mv "$claimed" "$FAILED/$(basename "$claimed").rc${rc}"; log "❌ FAILED rc=$rc"; notify "job failed rc=$rc"
   fi
+  claimed=""
 done

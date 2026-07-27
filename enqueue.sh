@@ -18,13 +18,16 @@
 #
 #  # force the light profile on a job (default = the worker's own PERF)
 #  ./enqueue.sh --id bg_clip --perf light --prompt "..."
+#
+#  # jump the queue — workers pick high-priority jobs first
+#  ./enqueue.sh --id urgent --priority high --prompt "..."
 # ============================================================================
 set -euo pipefail
 FARM_ROOT="${FARM_ROOT:-/Volumes/RenderFarm}"
 QUEUE="$FARM_ROOT/queue"; mkdir -p "$QUEUE"
 
 ID=""; TYPE="t2v"; PROMPT=""; IMAGE=""; WIDTH=1080; HEIGHT=1920; FRAMES=97; SEED=42; FPS=24; EXTRA=""; SWEEP=0
-LORA=""; LORA_SCALE="1.0"; STILL_PROMPT=""; PERF=""; MODE=""
+LORA=""; LORA_SCALE="1.0"; STILL_PROMPT=""; PERF=""; MODE=""; PRIORITY="normal"
 while [ $# -gt 0 ]; do case "$1" in
   --id)          ID="$2"; shift 2;;
   --type)        TYPE="$2"; shift 2;;
@@ -44,6 +47,8 @@ while [ $# -gt 0 ]; do case "$1" in
   --fps)         FPS="$2"; shift 2;;
   --extra)       EXTRA="$2"; shift 2;;
   --sweep)       SWEEP="$2"; shift 2;;
+  --priority)    PRIORITY="$2"; shift 2;;
+  --hi)          PRIORITY="high"; shift;;
   *) echo "unknown arg: $1"; exit 1;;
 esac; done
 [ -n "$PROMPT" ] || { echo "!! --prompt is required"; exit 1; }
@@ -65,7 +70,9 @@ echo "mode: $MODE"
 write_job(){
   local id="$1" seed="$2"
   local stamp; stamp="$(date +%Y%m%d_%H%M%S)_$RANDOM"
-  local f="$QUEUE/${stamp}__${id}.job"
+  local dest="$QUEUE"
+  if [ "$PRIORITY" = "high" ]; then dest="$QUEUE/hi"; mkdir -p "$dest"; fi
+  local f="$dest/${stamp}__${id}.job"
   {
     echo "ID=\"$id\""
     echo "TYPE=\"$TYPE\""
@@ -79,7 +86,7 @@ write_job(){
     echo "MODE=\"$MODE\""
     [ -n "$PERF" ] && echo "PERF=\"$PERF\""
   } > "$f"
-  echo "queued: $(basename "$f")  (seed=$seed mode=$MODE${PERF:+ perf=$PERF})"
+  echo "queued: $(basename "$f")  (seed=$seed mode=$MODE${PERF:+ perf=$PERF}$([ "$PRIORITY" = "high" ] && echo " [HIGH PRIORITY]"))"
 }
 
 if [ "$SWEEP" -gt 0 ]; then

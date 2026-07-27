@@ -38,6 +38,32 @@ test/hero cherry-pick + FarmMon menubar app all shipped.
 
 ## 3. FarmMon app (the menubar UI)
 
+- **P0 · M · Settings / Connection page** — a "Setup & Verify" view in the app so nobody
+  reverse-engineers the network from the README. Two halves:
+  - **What to connect (the checklist):** show, per Mac, the connections this box needs —
+    (1) ethernet → the gigabit switch, (2) WiFi above Ethernet in Service Order, (3) the
+    SMB share mounted at the configured path. Each row is a live ✅/❌, not static text.
+  - **Verify the link (one button):** a `verify_link` Tauri command that runs the checks
+    and returns a structured report the UI renders green/red with the exact fix per failure:
+    1. share path exists + is a mount (`FARM_ROOT` reachable, is it actually SMB not a stray
+       local dir) — today `farm_root()` in `lib.rs:48` only reads the env var; make it read
+       persisted config first, env second, default third.
+    2. the four queue dirs (`queue/ running/ done/ failed/` + `queue/hi/`) exist & are
+       writable (touch a `.probe` file and delete it — proves write perms over SMB).
+    3. coordinator reachable by name — `ping -c1 <coordinator>.local` and/or list the share.
+    4. workers seen — read `running/*.heartbeat` mtimes (the new heartbeat files) to show
+       which hosts are alive *right now*, distinct from just "a job is in running/".
+  - **Editable config, persisted:** coordinator name + share path (derive
+    `smb://<name>.local/RenderFarm`), PERF default, `MIN_FREE_GB`. Persist via
+    `tauri-plugin-store` (JSON in app data) so it survives relaunch — replaces the
+    env-var-only `FARM_ROOT`. `spawn_watcher` (`lib.rs:124`) should read from the store and
+    hot-reload when it changes.
+  - **Mount helper:** a "Mount share" button that shells `open "smb://<name>.local/RenderFarm"`
+    (Finder handles the auth prompt) so a new teammate never touches Connect-to-Server.
+  - Wire it into the tray menu ("Setup & Verify…") and as a tab in `ui/index.html` beside the
+    live dashboard. New commands to add to the `invoke_handler` (`lib.rs:234`): `verify_link`,
+    `get_config`, `save_config`, `mount_share`.
+
 - **P0 · M · Thumbnail previews** — dashboard shows the finished MP4's poster frame +
   click-to-play, and proof stills as a contact-sheet grid. Turns it from a counter into
   a review surface.
@@ -85,11 +111,15 @@ test/hero cherry-pick + FarmMon menubar app all shipped.
 
 ## Suggested first sprint (highest ROI, low effort)
 
-1. **Priority lanes** (§1) — stop heroes waiting behind sweeps.
-2. **Heartbeats** (§2) — kill false requeues.
-3. **Auto-promote winners + thumbnails in the app** (§1 + §3) — makes the
-   test→hero cherry-pick loop actually pleasant.
-4. **Enqueue from the app** (§3) — removes the terminal for everyone else.
-5. **Sign + notarise** (§5) — clean install for the team.
+> ✅ Shipped v0.1.x: Priority lanes, Heartbeats + heartbeat-aware reaper, Disk guard,
+> one-GPU-job lock, Metadata sidecars, `promote.sh` auto-promote.
+
+**Next up:**
+
+1. **Settings / Connection page** (§3) — in-app "Setup & Verify" so a new Mac joins
+   without the README: live connection checklist + one-button `verify_link`. ← wanted next.
+2. **Thumbnail previews** (§3) — turn the dashboard from a counter into a review surface.
+3. **Enqueue from the app** (§3) — removes the terminal for everyone else.
+4. **Sign + notarise** (§5) — clean install for the team (currently ad-hoc signed).
 
 *Add ideas here as they come up — this is the pickup list.*

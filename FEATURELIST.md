@@ -3,7 +3,7 @@
 Next features to pick up at the office. Grouped by theme, tagged by priority
 (**P0** = do next, **P1** = soon, **P2** = nice-to-have) with a rough effort
 (S/M/L) and the *why*. Current state: shell farm + provisioning + perf profiles +
-test/hero cherry-pick + FarmMon menubar app all shipped.
+test/hero cherry-pick + LTX Mac Farm menubar app all shipped.
 
 ---
 
@@ -36,7 +36,7 @@ test/hero cherry-pick + FarmMon menubar app all shipped.
 - **P2 · S · Disk guard** — worker refuses a job if free space < model + output headroom,
   instead of OOM/ENOSPC mid-render.
 
-## 3. FarmMon app (the menubar UI)
+## 3. LTX Mac Farm app (the menubar UI)
 
 - **P0 · M · Settings / Connection page** — a "Setup & Verify" view in the app so nobody
   reverse-engineers the network from the README. Two halves:
@@ -93,9 +93,9 @@ test/hero cherry-pick + FarmMon menubar app all shipped.
 
 ## 5. Distribution & onboarding
 
-- **P0 · S · Signed + notarised app** — codesign FarmMon with the Apple Developer ID so
+- **P0 · S · Signed + notarised app** — codesign LTX Mac Farm with the Apple Developer ID so
   teammates don't hit "unidentified developer". Ship a `.dmg`.
-- **P1 · M · One-file installer** — a `.pkg` that drops FarmMon.app, installs the
+- **P1 · M · One-file installer** — a `.pkg` that drops LTX Mac Farm.app, installs the
   toolchain, mounts the share, and provisions — replacing the setup.command sequence.
 - **P2 · S · `.env`-driven config** — a single `farm.env` (share path, coordinator name,
   perf default) all scripts + the app read, so a new Mac is one file to edit.

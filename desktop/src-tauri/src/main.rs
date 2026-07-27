@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    farmmon_lib::run();
+    ltx_mac_farm_lib::run();
 }

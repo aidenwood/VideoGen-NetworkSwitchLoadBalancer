@@ -1,12 +1,12 @@
 [package]
-name = "farmmon"
+name = "ltx-mac-farm"
 version = "0.1.0"
-description = "Render Farm menubar monitor"
+description = "LTX Mac Farm — render farm menubar monitor"
 authors = ["Aidxn Design"]
 edition = "2021"
 
 [lib]
-name = "farmmon_lib"
+name = "ltx_mac_farm_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

@@ -1,4 +1,4 @@
-// FarmMon — render-farm menubar monitor.
+// LTX Mac Farm — render-farm menubar monitor.
 // Polls the shared farm folder (FSEvents is unreliable over SMB, so we poll every
 // 2s and diff), fires a native notification + distinct sound on each ping event,
 // and keeps a tray tooltip + dashboard window live.

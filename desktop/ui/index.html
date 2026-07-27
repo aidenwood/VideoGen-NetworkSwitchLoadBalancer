@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Render Farm</title>
+<style>
+  :root{
+    --bg:#0f1117; --panel:#181b24; --line:#252836; --txt:#e7e9ee; --dim:#8b90a0;
+    --sent:#8b5cf6; --recv:#38bdf8; --done:#34d399; --fail:#f87171;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--bg); color:var(--txt);
+    font:13px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;
+    padding:16px; -webkit-user-select:none; user-select:none;
+  }
+  h1{font-size:14px;margin:0 0 2px;letter-spacing:.2px}
+  .root{color:var(--dim);font-size:11px;margin-bottom:14px;word-break:break-all}
+  .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 8px;text-align:center}
+  .card .n{font-size:22px;font-weight:700;line-height:1}
+  .card .l{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.6px;margin-top:4px}
+  .card.q .n{color:var(--sent)} .card.r .n{color:var(--recv)}
+  .card.d .n{color:var(--done)} .card.f .n{color:var(--fail)}
+  h2{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.6px;margin:0 0 8px}
+  .feed{display:flex;flex-direction:column;gap:6px}
+  .ev{display:flex;align-items:center;gap:9px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+  .dot{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+  .ev .m{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sent .dot{background:var(--sent)} .received .dot{background:var(--recv)}
+  .done .dot{background:var(--done)} .failed .dot{background:var(--fail)}
+  .empty{color:var(--dim);font-size:12px;padding:18px 0;text-align:center}
+</style>
+</head>
+<body>
+  <h1>Render Farm</h1>
+  <div class="root" id="root">—</div>
+  <div class="cards">
+    <div class="card q"><div class="n" id="c-queued">0</div><div class="l">Queued</div></div>
+    <div class="card r"><div class="n" id="c-running">0</div><div class="l">Running</div></div>
+    <div class="card d"><div class="n" id="c-done">0</div><div class="l">Done</div></div>
+    <div class="card f"><div class="n" id="c-failed">0</div><div class="l">Failed</div></div>
+  </div>
+  <h2>Recent pings</h2>
+  <div class="feed" id="feed"></div>
+
+<script>
+  const invoke = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
+  const VERB = { sent:"sent", received:"received", done:"finished", failed:"failed" };
+  const ICON = { sent:"📤", received:"📥", done:"✅", failed:"❌" };
+
+  // Build the event row with textContent only (ids/hosts come from filenames).
+  function row(ev){
+    const div = document.createElement("div");
+    div.className = "ev " + (ev.kind || "");
+    const dot = document.createElement("span");
+    dot.className = "dot";
+    const m = document.createElement("span");
+    m.className = "m";
+    const verb = VERB[ev.kind] || ev.kind || "";
+    const who = (ev.kind === "sent") ? "" : (ev.host && ev.host !== "?" ? ev.host + " " : "");
+    m.append((ICON[ev.kind] || "•") + " " + who + verb + " ");
+    const b = document.createElement("b");
+    b.textContent = ev.id || "?";
+    m.append(b);
+    div.append(dot, m);
+    return div;
+  }
+
+  function emptyNode(){
+    const d = document.createElement("div");
+    d.className = "empty";
+    d.textContent = "Waiting for activity…";
+    return d;
+  }
+
+  async function tick(){
+    if(!invoke) return;
+    try{
+      const s = await invoke("get_state");
+      document.getElementById("root").textContent = s.root || "—";
+      document.getElementById("c-queued").textContent  = s.counts.queued;
+      document.getElementById("c-running").textContent = s.counts.running;
+      document.getElementById("c-done").textContent    = s.counts.done;
+      document.getElementById("c-failed").textContent  = s.counts.failed;
+      const feed = document.getElementById("feed");
+      const nodes = (s.events && s.events.length) ? s.events.map(row) : [emptyNode()];
+      feed.replaceChildren(...nodes);
+    }catch(e){ /* window may be hidden before setup completes */ }
+  }
+  document.getElementById("feed").replaceChildren(emptyNode());
+  tick();
+  setInterval(tick, 2000);
+</script>
+</body>
+</html>

@@ -153,6 +153,15 @@ expensive video renders only on shots you've already approved.
 
 ---
 
+## Menubar app (optional) — see status + hear the pings
+
+`desktop/` is a native macOS menubar app (**FarmMon**, Tauri) that watches the share
+and gives every teammate **live tray status + a notification sound** each time a job
+is dispatched, picked up, or finished — so you know the farm's working without
+watching a terminal. Build it with `cd desktop && npm install && npm run tauri build`,
+then drop `FarmMon.app` in `/Applications` on each Mac. Details in
+[`desktop/README.md`](desktop/README.md).
+
 ## Performance profiles — `full` vs `light`
 
 Set per Mac in `start_worker.command` (`export PERF=...`), or override per job

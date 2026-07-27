@@ -1,0 +1,14 @@
+{
+  "name": "farmmon",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Render Farm menubar monitor — tray status + ping notifications",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.1.0"
+  }
+}

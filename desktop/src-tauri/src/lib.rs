@@ -69,11 +69,29 @@ impl Default for Config {
 
 impl Config {
     // config -> env -> default
+    fn name(&self) -> String {
+        let n = self.share_name.trim();
+        if n.is_empty() { "RenderFarm".to_string() } else { n.to_string() }
+    }
+
+    // Where the farm folder lives ON THIS MAC. The two roles are NOT the same
+    // path and conflating them is how you get "Permission denied (os error 13)":
+    //   coordinator — it HOSTS the folder, so it's a real local dir (~/RenderFarm).
+    //   worker      — it MOUNTS the coordinator's folder at /Volumes/<name>.
+    // /Volumes itself is root:wheel, so a coordinator that thinks it should
+    // write to /Volumes/RenderFarm cannot create anything there.
     fn root(&self) -> String {
         if !self.share_path.trim().is_empty() {
             return self.share_path.trim().to_string();
         }
-        std::env::var("FARM_ROOT").unwrap_or_else(|_| "/Volumes/RenderFarm".to_string())
+        if self.role == "coordinator" {
+            return self.local_root();
+        }
+        std::env::var("FARM_ROOT").unwrap_or_else(|_| format!("/Volumes/{}", self.name()))
+    }
+
+    fn local_root(&self) -> String {
+        format!("{}/{}", home(), self.name())
     }
     fn ltx(&self) -> String {
         if !self.ltx_dir.trim().is_empty() {
@@ -99,10 +117,31 @@ fn config_path() -> PathBuf {
 }
 
 fn load_config() -> Config {
-    std::fs::read_to_string(config_path())
+    let mut cfg: Config = std::fs::read_to_string(config_path())
         .ok()
         .and_then(|s| serde_json::from_str::<Config>(&s).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    cfg.normalize();
+    cfg
+}
+
+impl Config {
+    // Repair configs written before root() knew about roles. A coordinator with
+    // no share_path used to resolve to /Volumes/<name>, which is root-owned, so
+    // creating the queue folders failed with EACCES. Healing on load means an
+    // already-broken install fixes itself on next launch — nobody has to redo
+    // the wizard or hand-edit JSON.
+    fn normalize(&mut self) {
+        if self.role != "coordinator" {
+            return;
+        }
+        if self.share_path.trim().starts_with("/Volumes/") {
+            self.share_path = self.local_root();
+        }
+        if self.coordinator.trim().is_empty() {
+            self.coordinator = this_host();
+        }
+    }
 }
 
 fn write_config(cfg: &Config) -> Result<(), String> {
@@ -959,16 +998,44 @@ fn run_action(action: String, cfg_state: State<CfgState>) -> Result<String, Stri
             Ok("Opened the repo in your browser.".into())
         }
         "create_share_folder" => {
-            let p = format!("{}/{}", home(), cfg.share_name.trim());
-            std::fs::create_dir_all(&p).map_err(|e| e.to_string())?;
+            let p = cfg.local_root();
+            std::fs::create_dir_all(&p).map_err(|e| format!("Couldn't create {} — {}", p, e))?;
             let _ = Command::new("open").arg(&p).spawn();
             Ok(format!("Created {} — now add it in Sharing settings.", p))
         }
         "create_dirs" => {
-            for d in ["queue", "queue/hi", "running", "done", "failed", "assets"] {
-                std::fs::create_dir_all(Path::new(&root).join(d)).map_err(|e| e.to_string())?;
+            // Refuse to even try under /Volumes on a coordinator — that's the
+            // mount point workers use, it's root-owned, and the resulting
+            // "Permission denied (os error 13)" tells the user nothing.
+            if cfg.role == "coordinator" && root.starts_with("/Volumes/") {
+                return Err(format!(
+                    "This Mac is the coordinator, so the farm folder is {} — not {}. \
+                     /Volumes is macOS's mount point for OTHER Macs' shares and can't be \
+                     written to. Fixed automatically: press Re-check.",
+                    cfg.local_root(),
+                    root
+                ));
             }
-            Ok("Queue folders created on the share.".into())
+            for d in ["queue", "queue/hi", "running", "done", "failed", "assets", "logs"] {
+                let p = Path::new(&root).join(d);
+                std::fs::create_dir_all(&p).map_err(|e| {
+                    format!(
+                        "Couldn't create {} — {}.{}",
+                        p.display(),
+                        e,
+                        if e.kind() == std::io::ErrorKind::PermissionDenied {
+                            format!(
+                                " Nothing here is writable by you. The coordinator's folder \
+                                 should be {}; a worker's should be a mounted share.",
+                                cfg.local_root()
+                            )
+                        } else {
+                            String::new()
+                        }
+                    )
+                })?;
+            }
+            Ok(format!("Queue folders created in {}", root))
         }
         "start_worker" => match detect_repo(&cfg) {
             Some(d) => {
@@ -1109,7 +1176,7 @@ fn setup_steps(cfg_state: State<CfgState>) -> serde_json::Value {
     };
 
     if coord {
-        let folder = format!("{}/{}", home(), cfg.share_name.trim());
+        let folder = cfg.local_root();
         let has_folder = Path::new(&folder).is_dir();
         push(&mut steps, "folder", "Create the shared folder",
             "Every Mac reads jobs from one folder on this Mac. Make it first.",
@@ -1187,6 +1254,17 @@ fn setup_steps(cfg_state: State<CfgState>) -> serde_json::Value {
 fn set_role(role: String, cfg_state: State<CfgState>) -> Result<(), String> {
     let mut guard = cfg_state.0.lock().unwrap();
     guard.role = role;
+    // Repoint the farm folder at whatever the chosen role actually means, and
+    // heal a share_path left pointing at /Volumes — a coordinator can't write
+    // there, and that mismatch is what produced "Permission denied (os error 13)".
+    if guard.role == "coordinator" {
+        if guard.share_path.trim().is_empty() || guard.share_path.trim().starts_with("/Volumes/") {
+            guard.share_path = guard.local_root();
+        }
+        guard.coordinator = this_host(); // it IS the coordinator
+    } else if guard.role == "worker" && guard.share_path.trim() == guard.local_root() {
+        guard.share_path = String::new(); // fall back to the /Volumes mount
+    }
     write_config(&guard)
 }
 
@@ -1413,4 +1491,57 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running LTX Mac Farm");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cfg(role: &str, share_path: &str) -> Config {
+        Config { role: role.into(), share_path: share_path.into(), ..Default::default() }
+    }
+
+    // The regression: a coordinator with no share_path fell through to
+    // /Volumes/RenderFarm, which is root-owned, so creating the queue folders
+    // died with "Permission denied (os error 13)".
+    #[test]
+    fn coordinator_root_is_local_not_volumes() {
+        let c = cfg("coordinator", "");
+        assert_eq!(c.root(), format!("{}/RenderFarm", home()));
+        assert!(!c.root().starts_with("/Volumes/"));
+    }
+
+    #[test]
+    fn worker_root_is_the_mount_point() {
+        std::env::remove_var("FARM_ROOT");
+        assert_eq!(cfg("worker", "").root(), "/Volumes/RenderFarm");
+    }
+
+    // An install already broken by the old behaviour must fix itself on load.
+    #[test]
+    fn normalize_heals_a_coordinator_pointed_at_volumes() {
+        let mut c = cfg("coordinator", "/Volumes/RenderFarm");
+        c.normalize();
+        assert_eq!(c.share_path, format!("{}/RenderFarm", home()));
+        assert!(!c.coordinator.is_empty(), "coordinator should name itself");
+    }
+
+    #[test]
+    fn normalize_leaves_a_worker_alone() {
+        let mut c = cfg("worker", "/Volumes/RenderFarm");
+        c.normalize();
+        assert_eq!(c.share_path, "/Volumes/RenderFarm");
+    }
+
+    // share_name must flow through both paths, not be hardcoded.
+    #[test]
+    fn custom_share_name_is_respected() {
+        let mut c = cfg("coordinator", "");
+        c.share_name = "Renders2".into();
+        assert_eq!(c.root(), format!("{}/Renders2", home()));
+        let mut w = cfg("worker", "");
+        w.share_name = "Renders2".into();
+        std::env::remove_var("FARM_ROOT");
+        assert_eq!(w.root(), "/Volumes/Renders2");
+    }
 }

@@ -412,6 +412,19 @@
           skip.onclick = wizard;
           acts.append(skip);
         }
+        // These two shell out to the repo's scripts, so give an escape hatch
+        // for when auto-detection can't find where you cloned it.
+        if (s.id === "toolchain" || s.id === "models"){
+          const pick = document.createElement("button");
+          pick.className = "small";
+          pick.type = "button";
+          pick.textContent = "Choose folder…";
+          pick.onclick = async () => {
+            try{ toast(await invoke("pick_repo")); wizard(); }
+            catch(e){ toast(String(e), true); }
+          };
+          acts.append(pick);
+        }
         b.append(acts);
       }
     }

@@ -10,7 +10,9 @@ Built for a marketing team with 4× M4 Macs, but it scales to any number.
 > **[Get the latest LTX Mac Farm.app (.dmg) →](https://github.com/aidenwood/VideoGen-NetworkSwitchLoadBalancer/releases/latest)**
 >
 > Grab the `.dmg` from the latest release, open it, drag **LTX Mac Farm** into `/Applications`.
-> The app is the live status tray + ping sounds — the render scripts live in this repo.
+> The app is the farm's interface: guided setup, the job board, the review grid, the team
+> view and an overnight autopilot — in the menubar, and in a browser for the rest of the
+> team. The render scripts live in this repo.
 >
 > **First launch (the app isn't from the App Store, so macOS blocks it once):**
 > - If you see **"can't be opened / Apple could not verify…"** → **System Settings → Privacy & Security** → scroll down → **Open Anyway**.

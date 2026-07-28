@@ -3,215 +3,421 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Render Farm</title>
+<title>LTX Mac Farm</title>
 <style>
-  :root{
-    --bg:#0f1117; --panel:#181b24; --line:#252836; --txt:#e7e9ee; --dim:#8b90a0;
-    --sent:#8b5cf6; --recv:#38bdf8; --done:#34d399; --fail:#f87171; --warn:#fbbf24;
-  }
-  *{box-sizing:border-box}
-  html,body{margin:0;height:100%}
-  body{
-    background:var(--bg); color:var(--txt);
-    font:13px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;
-    padding:16px; -webkit-user-select:none; user-select:none;
-  }
-  h1{font-size:14px;margin:0 0 2px;letter-spacing:.2px}
-  .root{color:var(--dim);font-size:11px;margin-bottom:12px;word-break:break-all}
-  h2{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.6px;margin:0 0 8px}
+/* ===========================================================================
+   LTX Mac Farm — menubar popover
+   ---------------------------------------------------------------------------
+   Design notes, so the next person doesn't undo them by accident:
 
-  /* tabs */
-  .tabs{display:flex;gap:6px;margin-bottom:14px}
-  .tab{flex:1;background:var(--panel);border:1px solid var(--line);color:var(--dim);
-       border-radius:9px;padding:7px 0;text-align:center;font-size:12px;cursor:pointer}
-  .tab.on{color:var(--txt);border-color:#3a3f52;background:#20242f}
-  .page{display:none} .page.on{display:block}
+   TYPE. No webfonts (the app is self-contained), so identity comes from the
+   system stack. SF Pro carries prose; SF Mono carries every value that is a
+   machine truth — hostnames, job IDs, counts, paths, states. A render farm's
+   own vocabulary is monospace, so this reads as native rather than decorative.
+   Numerals are tabular wherever they tick, or the layout jitters every poll.
 
-  /* dashboard */
-  .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 8px;text-align:center}
-  .card .n{font-size:22px;font-weight:700;line-height:1}
-  .card .l{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.6px;margin-top:4px}
-  .card.q .n{color:var(--sent)} .card.r .n{color:var(--recv)}
-  .card.d .n{color:var(--done)} .card.f .n{color:var(--fail)}
-  .feed{display:flex;flex-direction:column;gap:6px}
-  .ev{display:flex;align-items:center;gap:9px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
-  .dot{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
-  .ev .m{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .sent .dot{background:var(--sent)} .received .dot{background:var(--recv)}
-  .done .dot{background:var(--done)} .failed .dot{background:var(--fail)}
-  .empty{color:var(--dim);font-size:12px;padding:18px 0;text-align:center}
+   COLOUR. Unchanged from the original semantic set — violet = dispatched,
+   cyan = picked up, green = done, red = failed, amber = attention. Those
+   meanings are load-bearing (the tray sounds map to them), so they stay put.
+   Added only --well, a recessed shade for insets.
 
-  /* setup */
-  .banner{border:1px solid var(--line);background:var(--panel);border-radius:12px;
-          padding:11px 12px;margin-bottom:12px;display:flex;gap:10px;align-items:center}
-  .banner .big{font-size:18px;line-height:1}
-  .banner .t{flex:1;min-width:0}
-  .banner .t b{display:block;font-size:13px}
-  .banner .t span{color:var(--dim);font-size:11px}
-  .banner.ready{border-color:#1f6f4e}
-  .banner.blocked{border-color:#6f2a2a}
-  .row{display:flex;gap:8px;margin-bottom:12px}
-  button{font:inherit;background:#20242f;color:var(--txt);border:1px solid var(--line);
-         border-radius:9px;padding:7px 12px;cursor:pointer}
-  button:hover{border-color:#3a3f52}
-  button.primary{background:#2b2350;border-color:#4c3fa0}
-  button.small{padding:4px 9px;font-size:11px;border-radius:7px}
-  .stage{margin-bottom:14px}
-  .stage > .h{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.6px;margin:0 0 6px}
-  .chk{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 10px;margin-bottom:6px;
-       display:flex;gap:9px;align-items:flex-start}
-  .chk .ic{flex:0 0 auto;width:16px;text-align:center;line-height:1.35}
-  .chk .body{flex:1;min-width:0}
-  .chk .lbl{font-weight:600}
-  .chk .det{color:var(--dim);font-size:11px;margin-top:2px;word-break:break-word}
-  .chk .fix{font-size:11px;margin-top:5px;padding:6px 8px;border-radius:7px;
-            background:#1e222c;border:1px solid var(--line);color:#c9cede}
-  .chk .acts{margin-top:6px}
-  .chk.ok{border-color:#22503c}
-  .chk.warn{border-color:#5a4718}
-  .chk.fail{border-color:#5a2626}
-  .chk.ok .ic{color:var(--done)} .chk.warn .ic{color:var(--warn)} .chk.fail .ic{color:var(--fail)}
-  .workers{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
-  .wk{background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:4px 10px;font-size:11px}
-  .wk.rendering{border-color:#1f5a7a;color:#bfe6ff}
-  form.cfg{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:11px 12px}
-  form.cfg label{display:block;font-size:11px;color:var(--dim);margin:0 0 3px}
-  form.cfg .f{margin-bottom:9px}
-  form.cfg input,form.cfg select{
-    width:100%;background:#12151d;border:1px solid var(--line);color:var(--txt);
-    border-radius:8px;padding:6px 8px;font:inherit;-webkit-user-select:text;user-select:text}
-  form.cfg .two{display:grid;grid-template-columns:1fr 1fr;gap:9px}
-  .hint{color:var(--dim);font-size:11px;margin:-4px 0 9px}
-  .toast{position:fixed;left:16px;right:16px;bottom:14px;background:#20242f;border:1px solid #3a3f52;
-         border-radius:10px;padding:9px 11px;font-size:12px;display:none;z-index:9}
-  .toast.bad{border-color:#6f2a2a}
+   SIGNATURE. The queue lane: the pipeline drawn as discrete ticks rather than
+   a progress bar. This is a video farm, so ticks read as frames. It's the one
+   loud element; everything around it stays quiet.
 
-  /* guided setup wizard */
-  .lead{font-size:13px;margin:0 0 4px}
-  .sub{color:var(--dim);font-size:11px;margin:0 0 14px}
-  .pick{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
-  .pick .opt{background:var(--panel);border:1px solid var(--line);border-radius:12px;
-             padding:12px;cursor:pointer;text-align:left}
-  .pick .opt:hover{border-color:#4c3fa0}
-  .pick .opt b{display:block;font-size:13px;margin-bottom:3px}
-  .pick .opt span{color:var(--dim);font-size:11px;line-height:1.4}
-  .steps{display:flex;flex-direction:column;gap:8px}
-  .st{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:11px 12px;
-      display:flex;gap:10px;align-items:flex-start;opacity:.55}
-  .st.now{opacity:1;border-color:#4c3fa0;background:#1c1b2c}
-  .st.done{opacity:1;border-color:#22503c}
-  .st .num{flex:0 0 auto;width:20px;height:20px;border-radius:50%;background:#2a2f3d;color:var(--dim);
-           font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:1px}
-  .st.now .num{background:var(--sent);color:#fff}
-  .st.done .num{background:#1f6f4e;color:#fff}
-  .st .b{flex:1;min-width:0}
-  .st .t{font-weight:600;font-size:13px}
-  .st .d{color:var(--dim);font-size:11px;margin-top:3px;line-height:1.45}
-  .st .state{font-size:11px;margin-top:5px;color:#9aa0b2;word-break:break-word}
-  .st .acts{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap}
-  .hosts{display:flex;flex-direction:column;gap:6px;margin-top:8px}
-  .hostbtn{background:#12151d;border:1px solid var(--line);color:var(--txt);border-radius:9px;
-           padding:8px 10px;text-align:left;cursor:pointer;font:inherit}
-  .hostbtn:hover{border-color:#4c3fa0}
-  .hostbtn.on{border-color:#1f6f4e;background:#16241d}
-  .bar{display:flex;gap:8px;margin-top:14px;align-items:center}
-  .bar .grow{flex:1}
-  .prog{height:4px;background:#20242f;border-radius:999px;overflow:hidden;margin-bottom:14px}
-  .prog i{display:block;height:100%;background:var(--sent);width:0;transition:width .25s}
-  .link{background:none;border:0;color:var(--dim);font-size:11px;cursor:pointer;padding:4px 0;text-decoration:underline}
+   SEQUENCE. Setup steps are numbered because setup genuinely is ordered — you
+   cannot provision before the share is mounted. The Farm view is live state,
+   not a sequence, so nothing there is numbered.
+   =========================================================================== */
+
+:root{
+  /* surfaces */
+  --bg:#0f1117; --panel:#181b24; --well:#0a0c11; --line:#252836; --line-soft:#1e2230;
+  /* text */
+  --txt:#e7e9ee; --dim:#8b90a0; --faint:#5f6575;
+  /* semantic — do not repurpose, the tray sounds map to these */
+  --sent:#8b5cf6; --recv:#38bdf8; --done:#34d399; --fail:#f87171; --warn:#fbbf24;
+
+  --r-card:12px; --r-ctl:9px;
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,monospace;
+  --ui:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  background:var(--bg); color:var(--txt);
+  font:13px/1.45 var(--ui);
+  padding:14px; -webkit-user-select:none; user-select:none;
+  -webkit-font-smoothing:antialiased;
+}
+h2{
+  font:600 10px/1 var(--mono); color:var(--faint);
+  text-transform:uppercase; letter-spacing:.09em;
+  margin:0 0 9px;
+}
+button{font:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--sent);outline-offset:2px;border-radius:4px}
+
+/* ---- header ------------------------------------------------------------ */
+.top{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.pip{
+  width:7px;height:7px;border-radius:50%;flex:0 0 auto;
+  background:var(--faint);box-shadow:0 0 0 3px rgba(255,255,255,.03);
+}
+.pip.live{background:var(--done)}
+.pip.busy{background:var(--recv);animation:breathe 2.2s ease-in-out infinite}
+.pip.stop{background:var(--fail)}
+@keyframes breathe{0%,100%{opacity:1}50%{opacity:.35}}
+.top .name{font-size:14px;font-weight:600;letter-spacing:-.01em;flex:1;min-width:0}
+.top .host{
+  font:500 10px/1 var(--mono); color:var(--faint);
+  text-transform:uppercase; letter-spacing:.06em;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:130px;
+}
+
+/* ---- segmented control ------------------------------------------------- */
+.seg{
+  display:flex;background:var(--well);border:1px solid var(--line-soft);
+  border-radius:var(--r-ctl);padding:2px;margin-bottom:14px;position:relative;
+}
+.seg button{
+  flex:1;background:none;border:0;color:var(--dim);
+  font-size:12px;font-weight:500;padding:6px 0;border-radius:7px;
+  transition:color .15s;position:relative;z-index:1;
+}
+.seg button[aria-selected="true"]{color:var(--txt)}
+.seg .thumb{
+  position:absolute;top:2px;bottom:2px;left:2px;width:0;
+  background:var(--panel);border:1px solid var(--line);border-radius:7px;
+  transition:transform .22s cubic-bezier(.32,.72,0,1),width .22s cubic-bezier(.32,.72,0,1);
+  z-index:0;
+}
+.badge{
+  display:inline-block;min-width:15px;padding:0 4px;margin-left:5px;
+  background:var(--fail);color:#fff;border-radius:99px;
+  font:600 9px/15px var(--mono);vertical-align:1px;
+}
+
+.view{display:none;animation:rise .22s ease both}
+.view.on{display:block}
+@keyframes rise{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+.card{
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r-card);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.025);
+}
+
+/* ---- SIGNATURE: the queue lane ----------------------------------------- */
+.lane{padding:13px 13px 11px;margin-bottom:10px}
+.lane .ticks{display:flex;gap:2px;align-items:flex-end;height:26px;margin-bottom:11px}
+.lane .tk{
+  flex:1;min-width:2px;border-radius:1px;background:var(--line);height:14%;
+  transition:height .3s cubic-bezier(.32,.72,0,1),background .3s,opacity .3s;
+}
+.lane .tk.q{height:46%;background:var(--sent);opacity:1}
+.lane .tk.r{height:100%;background:var(--recv);opacity:1;box-shadow:0 0 7px rgba(56,189,248,.5)}
+.lane .tk.d{height:26%;background:var(--done);opacity:.55}
+.lane .tk.f{height:26%;background:var(--fail);opacity:.75}
+.lane .tk.e{height:14%;background:var(--line-soft);opacity:1}
+.legend{display:flex;gap:12px;font:500 10px/1 var(--mono);letter-spacing:.04em}
+.legend b{font-weight:600;font-variant-numeric:tabular-nums}
+.legend i{width:6px;height:6px;border-radius:1px;display:inline-block;margin-right:5px}
+.legend .lq i{background:var(--sent)} .legend .lr i{background:var(--recv)}
+.legend .ld i{background:var(--done)} .legend .lf i{background:var(--fail)}
+.legend span{color:var(--faint);text-transform:uppercase}
+.legend .lf{margin-left:auto}
+
+/* ---- machines ---------------------------------------------------------- */
+.mach{padding:4px 0;margin-bottom:10px}
+.mach .m{display:flex;align-items:center;gap:9px;padding:8px 13px;border-top:1px solid var(--line-soft)}
+.mach .m:first-child{border-top:0}
+.mach .m .d{width:6px;height:6px;border-radius:50%;background:var(--faint);flex:0 0 auto}
+.mach .m.rendering .d{background:var(--recv);animation:breathe 2.2s ease-in-out infinite}
+.mach .m .who{font:600 11px/1.3 var(--mono);letter-spacing:.02em;flex:0 0 auto}
+.mach .m .job{
+  font:11px/1.3 var(--mono);color:var(--dim);flex:1;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;
+}
+.mach .m.idle .job{color:var(--faint)}
+
+/* ---- activity ---------------------------------------------------------- */
+.feed{display:flex;flex-direction:column;gap:4px}
+.ev{
+  display:flex;align-items:center;gap:8px;padding:7px 11px;
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r-ctl);
+  animation:rise .2s ease both;
+}
+.ev .d{width:5px;height:5px;border-radius:50%;flex:0 0 auto}
+.ev.sent .d{background:var(--sent)} .ev.received .d{background:var(--recv)}
+.ev.done .d{background:var(--done)} .ev.failed .d{background:var(--fail)}
+.ev .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+       font-size:11.5px;color:var(--dim)}
+.ev .t b{color:var(--txt);font:600 11px var(--mono)}
+
+/* ---- empty states: an invitation, not a shrug -------------------------- */
+.empty{text-align:center;padding:26px 18px;color:var(--dim);
+       border:1px dashed var(--line);border-radius:var(--r-card)}
+.empty .g{font-size:20px;margin-bottom:7px;opacity:.8}
+.empty p{margin:0 0 3px;font-size:12.5px;color:var(--txt)}
+.empty small{font-size:11px;color:var(--faint);display:block;line-height:1.5}
+.empty button{margin-top:11px}
+
+/* ---- buttons ----------------------------------------------------------- */
+.btn{
+  background:#20242f;color:var(--txt);border:1px solid var(--line);
+  border-radius:var(--r-ctl);padding:7px 13px;font-size:12px;font-weight:500;
+  transition:border-color .15s,background .15s,transform .06s;
+}
+.btn:hover:not(:disabled){border-color:#3c4257;background:#242936}
+.btn:active:not(:disabled){transform:translateY(.5px)}
+.btn:disabled{opacity:.5;cursor:default}
+.btn.pri{background:linear-gradient(180deg,#7c4ddb,#6b3fc4);border-color:#8b5cf6;color:#fff}
+.btn.pri:hover:not(:disabled){background:linear-gradient(180deg,#8b5cf6,#7442d0);border-color:#a78bfa}
+.btn.sm{padding:5px 10px;font-size:11px;border-radius:7px}
+.btn.link{background:none;border:0;color:var(--dim);font-size:11px;padding:5px 2px;text-decoration:underline}
+.btn.link:hover{color:var(--txt)}
+.spin{
+  display:inline-block;width:9px;height:9px;margin-right:6px;vertical-align:-1px;
+  border:1.5px solid rgba(255,255,255,.28);border-top-color:#fff;border-radius:50%;
+  animation:spin .6s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ---- setup wizard ------------------------------------------------------ */
+.lead{font-size:14px;font-weight:600;letter-spacing:-.01em;margin:0 0 4px}
+.sub{color:var(--dim);font-size:11.5px;margin:0 0 14px;line-height:1.5}
+
+.roles{display:flex;flex-direction:column;gap:8px}
+.role{
+  display:flex;gap:11px;align-items:flex-start;text-align:left;width:100%;
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r-card);
+  color:var(--txt);padding:13px;transition:border-color .15s,background .15s;
+}
+.role:hover{border-color:var(--sent);background:#1c1b2c}
+.role .ic{font-size:17px;line-height:1.2;flex:0 0 auto}
+.role b{display:block;font-size:13px;margin-bottom:3px}
+.role .why{display:block;color:var(--dim);font-size:11px;line-height:1.5;font-weight:400}
+
+.rail{display:flex;align-items:center;gap:8px;margin-bottom:13px}
+.rail .bar{flex:1;height:3px;background:var(--well);border-radius:99px;overflow:hidden}
+.rail .bar i{display:block;height:100%;background:var(--sent);width:0;
+             transition:width .35s cubic-bezier(.32,.72,0,1)}
+.rail .n{font:600 10px/1 var(--mono);color:var(--faint);letter-spacing:.05em;
+         font-variant-numeric:tabular-nums}
+
+.steps{display:flex;flex-direction:column;gap:6px}
+.step{
+  display:flex;gap:10px;align-items:flex-start;
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r-card);
+  padding:11px 12px;transition:border-color .2s,background .2s,opacity .2s;
+}
+.step.done{opacity:.62;padding:9px 12px}
+.step.done:hover{opacity:1}
+.step.now{border-color:#4c3fa0;background:#1b1a2b;box-shadow:0 0 0 3px rgba(139,92,246,.07)}
+.step.todo{opacity:.42}
+.step .n{
+  flex:0 0 auto;width:19px;height:19px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font:600 10px/1 var(--mono);background:#252a38;color:var(--faint);margin-top:1px;
+}
+.step.now .n{background:var(--sent);color:#fff}
+.step.done .n{background:rgba(52,211,153,.16);color:var(--done)}
+.step .body{flex:1;min-width:0}
+.step .h{font-size:12.5px;font-weight:600;line-height:1.35}
+.step .p{color:var(--dim);font-size:11px;line-height:1.5;margin-top:4px}
+.step .s{font:10.5px/1.45 var(--mono);color:var(--faint);margin-top:5px;word-break:break-word}
+.step.done .s{color:var(--done)}
+.step .acts{margin-top:9px;display:flex;gap:6px;flex-wrap:wrap}
+.step .err{
+  margin-top:8px;padding:8px 9px;border-radius:7px;font-size:11px;line-height:1.5;
+  background:rgba(248,113,113,.09);border:1px solid rgba(248,113,113,.3);color:#fca5a5;
+}
+.step .err b{display:block;color:#fecaca;margin-bottom:2px;font-size:11px}
+.step .looking{font:10.5px/1.5 var(--mono);color:var(--faint);margin-top:8px}
+
+.hosts{display:flex;flex-direction:column;gap:5px;margin-top:9px}
+.host-btn{
+  display:flex;align-items:center;gap:8px;text-align:left;width:100%;
+  background:var(--well);border:1px solid var(--line);color:var(--txt);
+  border-radius:var(--r-ctl);padding:8px 10px;
+  font:11.5px/1 var(--mono);transition:border-color .15s,background .15s;
+}
+.host-btn:hover{border-color:var(--sent);background:#161a26}
+.host-btn .m{margin-left:auto;color:var(--faint);font-size:10px}
+
+.bar-actions{display:flex;gap:8px;align-items:center;margin-top:14px}
+.bar-actions .grow{flex:1}
+
+/* ---- checks ------------------------------------------------------------ */
+.banner{
+  display:flex;gap:11px;align-items:center;padding:12px 13px;margin-bottom:11px;
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r-card);
+}
+.banner.ready{border-color:rgba(52,211,153,.4);background:rgba(52,211,153,.05)}
+.banner.blocked{border-color:rgba(248,113,113,.4);background:rgba(248,113,113,.05)}
+.banner .g{font-size:17px;line-height:1}
+.banner .tx{flex:1;min-width:0}
+.banner .tx b{display:block;font-size:12.5px;line-height:1.35}
+.banner .tx span{color:var(--dim);font:10.5px/1.45 var(--mono);word-break:break-word}
+
+.grp{margin-bottom:13px}
+.chk{
+  display:flex;gap:9px;align-items:flex-start;padding:9px 11px;margin-bottom:5px;
+  background:var(--panel);border:1px solid var(--line);border-radius:10px;
+}
+.chk.ok{border-color:rgba(52,211,153,.28)}
+.chk.warn{border-color:rgba(251,191,36,.32)}
+.chk.fail{border-color:rgba(248,113,113,.35)}
+.chk .g{flex:0 0 auto;width:14px;text-align:center;font-size:11px;line-height:1.45}
+.chk .b{flex:1;min-width:0}
+.chk .l{font-size:12px;font-weight:600}
+.chk .d{color:var(--dim);font:10.5px/1.45 var(--mono);margin-top:3px;word-break:break-word}
+.chk .fx{
+  margin-top:6px;padding:7px 8px;border-radius:6px;font-size:11px;line-height:1.5;
+  background:var(--well);border:1px solid var(--line);color:#c3c9d8;
+}
+
+/* ---- settings ---------------------------------------------------------- */
+form.cfg{padding:12px 13px}
+form.cfg .f{margin-bottom:10px}
+form.cfg .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+form.cfg label{
+  display:block;font:600 9.5px/1 var(--mono);color:var(--faint);
+  text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px;
+}
+form.cfg input,form.cfg select{
+  width:100%;background:var(--well);border:1px solid var(--line);color:var(--txt);
+  border-radius:8px;padding:7px 9px;font:12px var(--mono);
+  -webkit-user-select:text;user-select:text;transition:border-color .15s;
+}
+form.cfg input:focus,form.cfg select:focus{border-color:var(--sent);outline:none}
+form.cfg select{font-family:var(--ui)}
+.hint{color:var(--faint);font:10.5px/1.45 var(--mono);margin:-5px 0 10px;word-break:break-all}
+
+/* ---- toast ------------------------------------------------------------- */
+.toast{
+  position:fixed;left:14px;right:14px;bottom:12px;z-index:20;
+  background:#1d212c;border:1px solid #3a4054;border-radius:10px;
+  padding:9px 11px;font-size:11.5px;line-height:1.45;
+  box-shadow:0 8px 24px rgba(0,0,0,.5);
+  opacity:0;transform:translateY(6px);pointer-events:none;
+  transition:opacity .2s,transform .2s;
+}
+.toast.show{opacity:1;transform:none}
+.toast.bad{border-color:rgba(248,113,113,.5);background:#241a1d}
+.toast.good{border-color:rgba(52,211,153,.4);background:#152420}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;transition-duration:.001ms!important}
+}
 </style>
 </head>
 <body>
-  <h1>LTX Mac Farm</h1>
-  <div class="root" id="root">—</div>
 
-  <div class="tabs">
-    <div class="tab" id="tab-wiz">Setup</div>
-    <div class="tab on" id="tab-dash">Dashboard</div>
-    <div class="tab" id="tab-setup">Checks</div>
+  <div class="top">
+    <span class="pip" id="pip"></span>
+    <span class="name">LTX Mac Farm</span>
+    <span class="host" id="host">—</span>
   </div>
 
-  <!-- ------------------------- guided setup ------------------------- -->
-  <div class="page" id="page-wiz">
-    <!-- asked once: what is this Mac for -->
+  <div class="seg" role="tablist" aria-label="Views">
+    <span class="thumb" id="thumb"></span>
+    <button role="tab" id="tab-wiz"    aria-selected="false" aria-controls="view-wiz">Setup</button>
+    <button role="tab" id="tab-dash"   aria-selected="true"  aria-controls="view-dash">Farm</button>
+    <button role="tab" id="tab-checks" aria-selected="false" aria-controls="view-checks">Checks</button>
+  </div>
+
+  <!-- ============================ FARM ============================== -->
+  <section class="view on" id="view-dash" role="tabpanel" aria-labelledby="tab-dash">
+    <div class="card lane">
+      <div class="ticks" id="ticks" aria-hidden="true"></div>
+      <div class="legend">
+        <span class="lq"><i></i><b id="c-queued">0</b> queued</span>
+        <span class="lr"><i></i><b id="c-running">0</b> rendering</span>
+        <span class="ld"><i></i><b id="c-done">0</b> done</span>
+        <span class="lf"><i></i><b id="c-failed">0</b> failed</span>
+      </div>
+    </div>
+
+    <div id="mach-wrap" hidden>
+      <h2>Machines</h2>
+      <div class="card mach" id="mach"></div>
+    </div>
+
+    <h2>Activity</h2>
+    <div class="feed" id="feed"></div>
+  </section>
+
+  <!-- ============================ SETUP ============================= -->
+  <section class="view" id="view-wiz" role="tabpanel" aria-labelledby="tab-wiz">
     <div id="wiz-role">
       <p class="lead">What is this Mac's job?</p>
-      <p class="sub">You only answer this once. Everything after it is done for you where possible.</p>
-      <div class="pick">
-        <button class="opt" id="role-coord">
-          <b>🗄️ It holds the shared folder</b>
-          <span>The “coordinator”. One Mac in the office does this — it stores the job queue
-                everyone else reads. It can render too.</span>
+      <p class="sub">Asked once. Everything after it is done for you where macOS allows.</p>
+      <div class="roles">
+        <button class="role" id="role-coord">
+          <span class="ic">🗄️</span>
+          <span><b>It holds the shared folder</b>
+            <span class="why">The coordinator. One Mac in the office stores the job queue
+              everyone else reads. It can render too.</span></span>
         </button>
-        <button class="opt" id="role-worker">
-          <b>🎬 It just renders</b>
-          <span>A worker. Connects to the coordinator's folder and chews through jobs.
-                Pick this for every other Mac.</span>
+        <button class="role" id="role-worker">
+          <span class="ic">🎬</span>
+          <span><b>It just renders</b>
+            <span class="why">A worker. Connects to the coordinator's folder and chews
+              through jobs. Pick this for every other Mac.</span></span>
         </button>
       </div>
     </div>
 
-    <!-- the steps themselves -->
-    <div id="wiz-steps" style="display:none">
-      <p class="lead" id="w-title">Setting up this Mac</p>
+    <div id="wiz-steps" hidden>
+      <p class="lead" id="w-title">Setting up</p>
       <p class="sub" id="w-sub">—</p>
-      <div class="prog"><i id="w-prog"></i></div>
+      <div class="rail">
+        <div class="bar"><i id="w-prog"></i></div>
+        <span class="n" id="w-count">0/0</span>
+      </div>
       <div class="steps" id="w-list"></div>
-      <div class="bar">
-        <button class="small" id="w-recheck">Re-check</button>
+      <div class="bar-actions">
+        <button class="btn sm" id="w-recheck">Re-check</button>
         <span class="grow"></span>
-        <button class="link" id="w-role-again">Change role</button>
-        <button class="primary" id="w-finish">Finish</button>
+        <button class="btn link" id="w-role-again">Change role</button>
+        <button class="btn pri" id="w-finish">Skip for now</button>
       </div>
     </div>
-  </div>
+  </section>
 
-  <!-- ---------------------------------------------------------------- -->
-  <div class="page on" id="page-dash">
-    <div class="cards">
-      <div class="card q"><div class="n" id="c-queued">0</div><div class="l">Queued</div></div>
-      <div class="card r"><div class="n" id="c-running">0</div><div class="l">Running</div></div>
-      <div class="card d"><div class="n" id="c-done">0</div><div class="l">Done</div></div>
-      <div class="card f"><div class="n" id="c-failed">0</div><div class="l">Failed</div></div>
-    </div>
-    <h2>Recent pings</h2>
-    <div class="feed" id="feed"></div>
-  </div>
-
-  <!-- ---------------------------------------------------------------- -->
-  <div class="page" id="page-setup">
+  <!-- =========================== CHECKS ============================= -->
+  <section class="view" id="view-checks" role="tabpanel" aria-labelledby="tab-checks">
     <div class="banner" id="banner">
-      <div class="big" id="b-icon">⏳</div>
-      <div class="t"><b id="b-title">Checking this Mac…</b><span id="b-sub">—</span></div>
-      <button class="small" id="b-recheck">Re-check</button>
+      <span class="g" id="b-icon">⏳</span>
+      <span class="tx"><b id="b-title">Checking this Mac…</b><span id="b-sub">—</span></span>
+      <button class="btn sm" id="b-recheck">Re-check</button>
     </div>
-
-    <div class="workers" id="workers"></div>
     <div id="checks"></div>
 
     <h2>Settings</h2>
-    <form class="cfg" id="cfg" autocomplete="off">
+    <form class="cfg card" id="cfg" autocomplete="off">
       <div class="two">
         <div class="f">
-          <label for="f-coord">Coordinator Mac name</label>
+          <label for="f-coord">Coordinator Mac</label>
           <input id="f-coord" placeholder="mac-studio" spellcheck="false" />
         </div>
         <div class="f">
-          <label for="f-sharename">Shared folder name</label>
+          <label for="f-sharename">Folder name</label>
           <input id="f-sharename" placeholder="RenderFarm" spellcheck="false" />
         </div>
       </div>
       <div class="hint" id="h-url">smb://…</div>
-
       <div class="f">
-        <label for="f-share">Share path on this Mac</label>
+        <label for="f-share">Farm folder on this Mac</label>
         <input id="f-share" placeholder="/Volumes/RenderFarm" spellcheck="false" />
       </div>
       <div class="two">
         <div class="f">
-          <label for="f-perf">Speed profile (this Mac)</label>
+          <label for="f-perf">Speed profile</label>
           <select id="f-perf">
+            <option value="auto">auto — size to this Mac's RAM</option>
             <option value="full">full — dedicated render Mac</option>
             <option value="light">light — someone's daily driver</option>
           </select>
@@ -222,421 +428,455 @@
         </div>
       </div>
       <div class="f">
-        <label for="f-repo">Farm scripts folder (blank = auto-detect)</label>
-        <input id="f-repo" placeholder="~/Desktop/VideoGen-NetworkSwitchLoadBalancer" spellcheck="false" />
+        <label for="f-repo">Farm scripts folder</label>
+        <input id="f-repo" placeholder="auto-detect" spellcheck="false" />
       </div>
       <div class="f">
-        <label for="f-ltx">LTX2-MLX folder (blank = ~/video-gen/LTX2-MLX)</label>
+        <label for="f-ltx">LTX2-MLX folder</label>
         <input id="f-ltx" placeholder="~/video-gen/LTX2-MLX" spellcheck="false" />
       </div>
-      <div class="row" style="margin:0">
-        <button class="primary" type="submit">Save &amp; re-check</button>
-        <button type="button" id="btn-mount">Mount share</button>
+      <div class="bar-actions" style="margin-top:2px">
+        <button class="btn pri" type="submit">Save &amp; re-check</button>
+        <span class="grow"></span>
+        <button class="btn sm" type="button" id="btn-mount">Connect share</button>
       </div>
     </form>
-    <div class="hint" id="cfgfile" style="margin-top:8px"></div>
-  </div>
+    <div class="hint" id="cfgfile" style="margin-top:9px"></div>
+  </section>
 
-  <div class="toast" id="toast"></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
-  const invoke = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
-  const VERB = { sent:"sent", received:"received", done:"finished", failed:"failed" };
-  const ICON = { sent:"📤", received:"📥", done:"✅", failed:"❌" };
-  const MARK = { ok:"✅", warn:"⚠️", fail:"❌" };
-  const $ = (id) => document.getElementById(id);
+"use strict";
+const rawInvoke = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
+const $ = (id) => document.getElementById(id);
 
-  /* ---------- tabs ---------- */
-  let tab = "dash";
-  function openTab(which){
-    tab = which;
-    ["wiz","dash","setup"].forEach(t => {
-      $("tab-" + t).classList.toggle("on", which === t);
-      $("page-" + t).classList.toggle("on", which === t);
-    });
-    if (which === "setup") verify();
-    if (which === "wiz")   wizard();
-  }
-  window.__openTab = openTab;                 // tray menu calls this
-  $("tab-wiz").onclick   = () => openTab("wiz");
-  $("tab-dash").onclick  = () => openTab("dash");
-  $("tab-setup").onclick = () => openTab("setup");
+/* Single funnel for every backend call. Anything that throws gets surfaced —
+   a silently swallowed error is how a dead button passes for a working one. */
+async function call(cmd, args){
+  if(!rawInvoke) throw new Error("Not running inside the app");
+  return await rawInvoke(cmd, args);
+}
+const errText = (e) => String(e && e.message ? e.message : e);
 
-  function toast(msg, bad){
-    const t = $("toast");
-    t.textContent = msg;
-    t.className = "toast" + (bad ? " bad" : "");
-    t.style.display = "block";
-    clearTimeout(toast._t);
-    toast._t = setTimeout(() => { t.style.display = "none"; }, 4200);
-  }
+const VERB = { sent:"dispatched", received:"picked up", done:"finished", failed:"failed" };
+const MARK = { ok:"✅", warn:"⚠️", fail:"❌" };
 
-  /* ---------- dashboard ---------- */
-  function row(ev){
-    const div = document.createElement("div");
-    div.className = "ev " + (ev.kind || "");
-    const dot = document.createElement("span");
-    dot.className = "dot";
-    const m = document.createElement("span");
-    m.className = "m";
-    const verb = VERB[ev.kind] || ev.kind || "";
-    const who = (ev.kind === "sent") ? "" : (ev.host && ev.host !== "?" ? ev.host + " " : "");
-    m.append((ICON[ev.kind] || "•") + " " + who + verb + " ");
-    const b = document.createElement("b");
-    b.textContent = ev.id || "?";
-    m.append(b);
-    div.append(dot, m);
-    return div;
-  }
+/* ---------- toast ---------- */
+let toastT;
+function toast(msg, kind){
+  const t = $("toast");
+  t.textContent = msg;
+  t.className = "toast show" + (kind ? " " + kind : "");
+  clearTimeout(toastT);
+  toastT = setTimeout(() => { t.className = "toast" + (kind ? " " + kind : ""); }, 4600);
+}
 
-  function emptyNode(text){
-    const d = document.createElement("div");
-    d.className = "empty";
-    d.textContent = text || "Waiting for activity…";
-    return d;
-  }
-
-  async function tick(){
-    if(!invoke) return;
-    try{
-      const s = await invoke("get_state");
-      $("root").textContent = s.root || "—";
-      $("c-queued").textContent  = s.counts.queued;
-      $("c-running").textContent = s.counts.running;
-      $("c-done").textContent    = s.counts.done;
-      $("c-failed").textContent  = s.counts.failed;
-      const feed = $("feed");
-      const nodes = (s.events && s.events.length) ? s.events.map(row) : [emptyNode()];
-      feed.replaceChildren(...nodes);
-    }catch(e){ /* window may be hidden before setup completes */ }
-  }
-
-  /* ---------- guided setup wizard ----------
-     The step list is recomputed from the real world every time, never from a
-     stored "current step". So quitting halfway, or doing a step by hand in
-     Finder, both just work — the wizard simply notices and moves on. */
-
-  async function setRole(role){
-    try{
-      await invoke("set_role", { role });
-      await wizard();
-    }catch(e){ toast(String(e), true); }
-  }
-  $("role-coord").onclick  = () => setRole("coordinator");
-  $("role-worker").onclick = () => setRole("worker");
-  $("w-role-again").onclick = () => setRole("");
-
-  // The coordinator picker: browse Bonjour so nobody has to know a hostname.
-  async function hostPicker(container, current){
-    const box = document.createElement("div");
-    box.className = "hosts";
-    const hint = document.createElement("div");
-    hint.className = "state";
-    hint.textContent = "Looking for Macs sharing a folder…";
-    box.append(hint);
-    container.append(box);
-    let hosts = [];
-    try{ hosts = await invoke("discover_coordinators"); }catch(e){ hosts = []; }
-    box.replaceChildren();
-    if (!hosts.length){
-      const none = document.createElement("div");
-      none.className = "state";
-      none.textContent = "None found. Make sure the coordinator Mac has File Sharing on " +
-                         "and is plugged into the same switch, then Re-check.";
-      box.append(none);
-      return;
-    }
-    hosts.forEach(h => {
-      const b = document.createElement("button");
-      b.className = "hostbtn" + (h === current ? " on" : "");
-      b.type = "button";
-      b.textContent = (h === current ? "✅  " : "🖥️  ") + h;
-      b.onclick = async () => {
-        try{
-          await invoke("set_coordinator", { name: h });
-          toast("Coordinator set to " + h);
-          wizard();
-        }catch(e){ toast(String(e), true); }
-      };
-      box.append(b);
-    });
-  }
-
-  function stepNode(s, idx, isNow){
-    const d = document.createElement("div");
-    d.className = "st" + (s.done ? " done" : (isNow ? " now" : ""));
-    const n = document.createElement("div");
-    n.className = "num";
-    n.textContent = s.done ? "✓" : String(idx + 1);
-    const b = document.createElement("div");
-    b.className = "b";
-    const t = document.createElement("div");
-    t.className = "t";
-    t.textContent = s.title;
-    const dd = document.createElement("div");
-    dd.className = "d";
-    dd.textContent = s.body;
-    const st = document.createElement("div");
-    st.className = "state";
-    st.textContent = (s.done ? "✅ " : "") + s.detail;
-    b.append(t, dd, st);
-
-    // only the step you're on gets buttons — keeps it one decision at a time
-    if (isNow && !s.done){
-      if (s.id === "pick"){
-        hostPicker(b, "");
-      } else if (s.action){
-        const acts = document.createElement("div");
-        acts.className = "acts";
-        const btn = document.createElement("button");
-        btn.className = "primary small";
-        btn.type = "button";
-        btn.textContent = s.action_label;
-        btn.onclick = async () => {
-          btn.disabled = true;
-          btn.textContent = "Working…";
-          try{
-            const msg = await invoke("run_action", { action: s.action });
-            toast(msg);
-          }catch(e){ toast(String(e), true); }
-          setTimeout(wizard, s.manual ? 400 : 1500);
-        };
-        acts.append(btn);
-        if (s.manual){
-          const skip = document.createElement("button");
-          skip.className = "small";
-          skip.type = "button";
-          skip.textContent = "I've done it";
-          skip.onclick = wizard;
-          acts.append(skip);
-        }
-        // These two shell out to the repo's scripts, so give an escape hatch
-        // for when auto-detection can't find where you cloned it.
-        if (s.id === "toolchain" || s.id === "models" || s.id === "stage"){
-          const pick = document.createElement("button");
-          pick.className = "small";
-          pick.type = "button";
-          pick.textContent = "Choose folder…";
-          pick.onclick = async () => {
-            try{ toast(await invoke("pick_repo")); wizard(); }
-            catch(e){ toast(String(e), true); }
-          };
-          acts.append(pick);
-        }
-        b.append(acts);
-      }
-    }
-    d.append(n, b);
-    return d;
-  }
-
-  let wizBusy = false;
-  async function wizard(){
-    if(!invoke || wizBusy) return;
-    wizBusy = true;
-    try{
-      const r = await invoke("setup_steps");
-      const hasRole = !!(r.role && r.role.length);
-      $("wiz-role").style.display  = hasRole ? "none" : "block";
-      $("wiz-steps").style.display = hasRole ? "block" : "none";
-      if (!hasRole) return;
-
-      const steps = r.steps || [];
-      const doneN = steps.filter(s => s.done).length;
-      const now = steps.findIndex(s => !s.done);
-
-      $("w-title").textContent = r.all_done
-        ? "✅ This Mac is ready"
-        : "Setting up " + r.host + " — step " + (now + 1) + " of " + steps.length;
-      $("w-sub").textContent = r.all_done
-        ? (r.role === "coordinator"
-            ? "It's hosting the queue at " + r.root + ". Other Macs can now point at it."
-            : "Connected to " + r.root + ". Open Dashboard to watch jobs come through.")
-        : (r.role === "coordinator" ? "This Mac holds the shared folder." : "This Mac renders jobs.");
-      $("w-prog").style.width = Math.round((doneN / Math.max(steps.length,1)) * 100) + "%";
-      $("w-list").replaceChildren(...steps.map((s, i) => stepNode(s, i, i === now)));
-      $("w-finish").textContent = r.all_done ? "Done — open Dashboard" : "Skip for now";
-    }catch(e){
-      $("w-sub").textContent = String(e);
-    }finally{ wizBusy = false; }
-  }
-  $("w-recheck").onclick = wizard;
-  $("w-finish").onclick = async () => {
-    try{ await invoke("finish_wizard"); }catch(e){}
-    openTab("dash");
-  };
-
-  /* ---------- setup & verify ---------- */
-  function checkNode(c){
-    const d = document.createElement("div");
-    d.className = "chk " + (c.status || "");
-    const ic = document.createElement("div");
-    ic.className = "ic";
-    ic.textContent = MARK[c.status] || "•";
-    const body = document.createElement("div");
-    body.className = "body";
-    const lbl = document.createElement("div");
-    lbl.className = "lbl";
-    lbl.textContent = c.label;
-    const det = document.createElement("div");
-    det.className = "det";
-    det.textContent = c.detail || "";
-    body.append(lbl, det);
-    if (c.fix){
-      const fix = document.createElement("div");
-      fix.className = "fix";
-      fix.textContent = c.fix;
-      body.append(fix);
-    }
-    if (c.action){
-      const wrap = document.createElement("div");
-      wrap.className = "acts";
-      const b = document.createElement("button");
-      b.className = "small";
-      b.type = "button";
-      b.textContent = c.action_label || "Fix";
-      b.onclick = () => doAction(c.action);
-      wrap.append(b);
-      body.append(wrap);
-    }
-    d.append(ic, body);
-    return d;
-  }
-
-  async function doAction(action){
-    try{
-      const msg = await invoke("run_action", { action });
-      toast(msg);
-      setTimeout(verify, 1200);
-    }catch(e){ toast(String(e), true); }
-  }
-
-  let verifying = false;
-  async function verify(){
-    if(!invoke || verifying) return;
-    verifying = true;
-    $("b-icon").textContent = "⏳";
-    $("b-title").textContent = "Checking this Mac…";
-    try{
-      const r = await invoke("verify_link");
-
-      const banner = $("banner");
-      banner.className = "banner " + (r.fail ? "blocked" : "ready");
-      $("b-icon").textContent = r.fail ? "❌" : (r.warn ? "⚠️" : "✅");
-      $("b-title").textContent = r.fail
-        ? (r.fail + " step" + (r.fail === 1 ? "" : "s") + " left before this Mac can render")
-        : (r.warn ? "Connected — " + r.warn + " thing(s) worth a look" : "This Mac is fully set up");
-      $("b-sub").textContent =
-        r.host + (r.is_coordinator ? " (coordinator)" : "") + " · " + r.root +
-        " · " + r.ok + " ok / " + r.warn + " warn / " + r.fail + " failed";
-
-      // who's on the farm right now
-      const wk = $("workers");
-      if (r.workers && r.workers.length){
-        wk.replaceChildren(...r.workers.map(w => {
-          const s = document.createElement("span");
-          s.className = "wk " + w.state;
-          s.textContent = (w.state === "rendering" ? "▶ " : "○ ") + w.host +
-                          (w.job ? " · " + w.job : "");
-          return s;
-        }));
-      } else {
-        wk.replaceChildren();
-      }
-
-      // checks, grouped by stage in order
-      const host = $("checks");
-      const groups = [];
-      let cur = null;
-      (r.checks || []).forEach(c => {
-        if (!cur || cur.label !== c.stage_label){
-          cur = { label: c.stage_label, items: [] };
-          groups.push(cur);
-        }
-        cur.items.push(c);
-      });
-      host.replaceChildren(...groups.map(g => {
-        const box = document.createElement("div");
-        box.className = "stage";
-        const h = document.createElement("div");
-        h.className = "h";
-        h.textContent = g.label;
-        box.append(h, ...g.items.map(checkNode));
-        return box;
-      }));
-    }catch(e){
-      $("b-icon").textContent = "❌";
-      $("b-title").textContent = "Couldn't run the checks";
-      $("b-sub").textContent = String(e);
-    }finally{ verifying = false; }
-  }
-  $("b-recheck").onclick = verify;
-
-  /* ---------- config form ---------- */
-  function shareUrlPreview(){
-    const name = ($("f-coord").value || "…").trim();
-    const share = ($("f-sharename").value || "RenderFarm").trim();
-    $("h-url").textContent = "smb://" + name + ".local/" + share;
-  }
-  $("f-coord").addEventListener("input", shareUrlPreview);
-  $("f-sharename").addEventListener("input", shareUrlPreview);
-
-  async function loadConfig(){
-    if(!invoke) return;
-    try{
-      const r = await invoke("get_config");
-      const c = r.config || {};
-      $("f-coord").value     = c.coordinator || "";
-      $("f-sharename").value = c.share_name || "RenderFarm";
-      $("f-share").value     = c.share_path || "";
-      $("f-perf").value      = c.perf || "full";
-      $("f-disk").value      = c.min_free_gb || 15;
-      $("f-repo").value      = c.repo_dir || "";
-      $("f-ltx").value       = c.ltx_dir || "";
-      $("f-share").placeholder = (r.resolved && r.resolved.root) || "/Volumes/RenderFarm";
-      $("f-ltx").placeholder   = (r.resolved && r.resolved.ltx_dir) || "";
-      $("cfgfile").textContent = "Saved to " + (r.config_file || "");
-      shareUrlPreview();
-    }catch(e){ /* ignore */ }
-  }
-
-  $("cfg").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    try{
-      await invoke("save_config", { cfg: {
-        coordinator: $("f-coord").value.trim(),
-        share_path:  $("f-share").value.trim(),
-        share_name:  ($("f-sharename").value.trim() || "RenderFarm"),
-        perf:        $("f-perf").value,
-        min_free_gb: parseInt($("f-disk").value, 10) || 15,
-        ltx_dir:     $("f-ltx").value.trim(),
-        lora_dir:    "",
-        repo_dir:    $("f-repo").value.trim()
-      }});
-      toast("Settings saved — the watcher picks up the new share within 2s.");
-      loadConfig();
-      verify();
-    }catch(err){ toast(String(err), true); }
+/* ---------- tabs ---------- */
+const TABS = ["wiz","dash","checks"];
+let tab = "dash";
+function moveThumb(){
+  const btn = $("tab-" + tab);
+  if(!btn || !btn.offsetWidth) return;
+  $("thumb").style.width = btn.offsetWidth + "px";
+  $("thumb").style.transform = "translateX(" + (btn.offsetLeft - 3) + "px)";
+}
+function openTab(which){
+  if(!TABS.includes(which)) return;
+  tab = which;
+  TABS.forEach(t => {
+    $("tab-" + t).setAttribute("aria-selected", String(t === which));
+    $("view-" + t).classList.toggle("on", t === which);
   });
+  moveThumb();
+  if(which === "checks") verify();
+  if(which === "wiz")    wizard();
+}
+window.__openTab = openTab;                 // the tray menu calls this
+TABS.forEach(t => { $("tab-" + t).onclick = () => openTab(t); });
+addEventListener("resize", moveThumb);
 
-  $("btn-mount").onclick = () => doAction("mount_share");
+/* ================= FARM ================= */
 
-  /* ---------- boot ----------
-     A Mac that has never been set up opens on the wizard, not on an empty
-     dashboard of zeroes. That was the whole problem: the app looked broken
-     when it was simply unconfigured. */
-  $("feed").replaceChildren(emptyNode());
+/* The queue lane. Ticks, not a bar: this is a video farm, so they read as
+   frames. Proportional once the queue outgrows the lane. */
+const LANE = 46;
+function drawLane(c){
+  const host = $("ticks");
+  while(host.children.length < LANE){
+    const s = document.createElement("span"); s.className = "tk e"; host.append(s);
+  }
+  const total = c.queued + c.running + c.done + c.failed;
+  const want = [];
+  if(total > 0){
+    const share = (n) => Math.round((n / total) * LANE);
+    const d = share(c.done);
+    const f = c.failed ? Math.max(1, share(c.failed)) : 0;
+    const r = c.running ? Math.max(1, share(c.running)) : 0;
+    const q = c.queued ? Math.max(1, share(c.queued)) : 0;
+    for(let i=0;i<d;i++) want.push("d");
+    for(let i=0;i<f;i++) want.push("f");
+    for(let i=0;i<r;i++) want.push("r");
+    for(let i=0;i<q;i++) want.push("q");
+  }
+  while(want.length > LANE) want.pop();
+  while(want.length < LANE) want.push("e");
+  // reuse nodes so heights animate instead of snapping
+  for(let i=0;i<LANE;i++) host.children[i].className = "tk " + want[i];
+}
+
+function evNode(ev){
+  const d = document.createElement("div");
+  d.className = "ev " + (ev.kind || "");
+  const dot = document.createElement("span"); dot.className = "d";
+  const t = document.createElement("span"); t.className = "t";
+  const who = (ev.kind === "sent") ? "" : (ev.host && ev.host !== "?" ? ev.host + " " : "");
+  t.append(who + (VERB[ev.kind] || ev.kind || "") + " ");
+  const b = document.createElement("b"); b.textContent = ev.id || "?";
+  t.append(b);
+  d.append(dot, t);
+  return d;
+}
+
+function emptyNode(glyph, line, small){
+  const d = document.createElement("div"); d.className = "empty";
+  const g = document.createElement("div"); g.className = "g"; g.textContent = glyph;
+  const p = document.createElement("p"); p.textContent = line;
+  const s = document.createElement("small"); s.textContent = small;
+  d.append(g,p,s);
+  return d;
+}
+
+function machNode(w){
+  const d = document.createElement("div");
+  d.className = "m " + (w.state || "idle");
+  const dot = document.createElement("span"); dot.className = "d";
+  const who = document.createElement("span"); who.className = "who"; who.textContent = w.host;
+  const job = document.createElement("span"); job.className = "job";
+  job.textContent = w.state === "rendering" ? (w.job || "rendering") : "idle";
+  d.append(dot, who, job);
+  return d;
+}
+
+async function tick(){
+  if(!rawInvoke) return;
+  try{
+    const s = await call("get_state");
+    const c = s.counts;
+    $("c-queued").textContent  = c.queued;
+    $("c-running").textContent = c.running;
+    $("c-done").textContent    = c.done;
+    $("c-failed").textContent  = c.failed;
+    drawLane(c);
+    $("pip").className = "pip " + (c.running > 0 ? "busy" : (s.root ? "live" : "stop"));
+
+    const wrap = $("mach-wrap");
+    if(s.workers && s.workers.length){
+      $("mach").replaceChildren(...s.workers.map(machNode));
+      wrap.hidden = false;
+    } else { wrap.hidden = true; }
+
+    const feed = $("feed");
+    if(s.events && s.events.length){
+      feed.replaceChildren(...s.events.slice(-7).reverse().map(evNode));
+    } else {
+      feed.replaceChildren(emptyNode("🎬","Nothing has run yet",
+        "Queue a clip with enqueue.sh and it appears here the moment a Mac claims it."));
+    }
+  }catch(e){
+    $("pip").className = "pip stop";
+  }
+}
+
+/* ================= SETUP ================= */
+
+async function setRole(role){
+  try{ await call("set_role", { role }); await wizard(); }
+  catch(e){ toast(errText(e), "bad"); }
+}
+$("role-coord").onclick   = () => setRole("coordinator");
+$("role-worker").onclick  = () => setRole("worker");
+$("w-role-again").onclick = () => setRole("");
+
+/* Workers pick their coordinator from a Bonjour browse — nobody should need to
+   know a hostname to join a farm. */
+async function hostPicker(container){
+  const loading = document.createElement("div");
+  loading.className = "looking";
+  loading.innerHTML = '<span class="spin"></span>Looking for Macs sharing a folder…';
+  container.append(loading);
+  let hosts = [];
+  try{ hosts = await call("discover_coordinators"); }catch(e){ hosts = []; }
+  loading.remove();
+  if(!hosts.length){
+    const none = document.createElement("div");
+    none.className = "looking";
+    none.textContent = "No Macs found. Check the coordinator has File Sharing on and is " +
+                       "plugged into the same switch, then Re-check.";
+    container.append(none);
+    return;
+  }
+  const box = document.createElement("div"); box.className = "hosts";
+  hosts.forEach(h => {
+    const b = document.createElement("button");
+    b.className = "host-btn"; b.type = "button";
+    const ic = document.createElement("span"); ic.textContent = "🖥️";
+    const nm = document.createElement("span"); nm.textContent = h;
+    const m  = document.createElement("span"); m.className = "m"; m.textContent = "sharing";
+    b.append(ic, nm, m);
+    b.onclick = async () => {
+      try{ await call("set_coordinator", { name: h }); toast("Coordinator set to " + h, "good"); wizard(); }
+      catch(e){ toast(errText(e), "bad"); }
+    };
+    box.append(b);
+  });
+  container.append(box);
+}
+
+function stepNode(s, i, isNow){
+  const d = document.createElement("div");
+  d.className = "step " + (s.done ? "done" : (isNow ? "now" : "todo"));
+  const n = document.createElement("div"); n.className = "n";
+  n.textContent = s.done ? "✓" : String(i + 1);
+  const body = document.createElement("div"); body.className = "body";
+  const h = document.createElement("div"); h.className = "h"; h.textContent = s.title;
+  body.append(h);
+
+  // Only the current step explains itself. Finished ones collapse to a line —
+  // instructions you've already followed are just noise.
+  if(isNow && !s.done){
+    const p = document.createElement("div"); p.className = "p"; p.textContent = s.body;
+    body.append(p);
+  }
+  const st = document.createElement("div"); st.className = "s"; st.textContent = s.detail;
+  body.append(st);
+
+  if(isNow && !s.done){
+    if(s.id === "pick"){
+      hostPicker(body);
+    } else if(s.action){
+      const acts = document.createElement("div"); acts.className = "acts";
+      const btn = document.createElement("button");
+      btn.className = "btn pri sm"; btn.type = "button"; btn.textContent = s.action_label;
+      btn.onclick = async () => {
+        const label = s.action_label;
+        btn.disabled = true;
+        btn.replaceChildren();
+        const sp = document.createElement("span"); sp.className = "spin";
+        btn.append(sp, document.createTextNode("Working…"));
+        body.querySelectorAll(".err").forEach(x => x.remove());
+        try{
+          toast(await call("run_action", { action: s.action }), "good");
+          setTimeout(wizard, s.manual ? 400 : 1400);
+        }catch(e){
+          // Inline, not a toast: this is the one thing the user has to read.
+          const err = document.createElement("div"); err.className = "err";
+          const b = document.createElement("b"); b.textContent = "That didn't work";
+          err.append(b, document.createTextNode(errText(e)));
+          body.append(err);
+          btn.disabled = false; btn.textContent = label;
+        }
+      };
+      acts.append(btn);
+      if(s.manual){
+        const skip = document.createElement("button");
+        skip.className = "btn sm"; skip.type = "button"; skip.textContent = "I've done it";
+        skip.onclick = wizard; acts.append(skip);
+      }
+      if(s.id === "toolchain" || s.id === "models" || s.id === "stage"){
+        const pick = document.createElement("button");
+        pick.className = "btn sm"; pick.type = "button"; pick.textContent = "Choose folder…";
+        pick.onclick = async () => {
+          try{ toast(await call("pick_repo"), "good"); wizard(); }
+          catch(e){ toast(errText(e), "bad"); }
+        };
+        acts.append(pick);
+      }
+      body.append(acts);
+    }
+  }
+  d.append(n, body);
+  return d;
+}
+
+let wizBusy = false;
+async function wizard(){
+  if(!rawInvoke || wizBusy) return;
+  wizBusy = true;
+  try{
+    const r = await call("setup_steps");
+    const hasRole = !!(r.role && r.role.length);
+    $("wiz-role").hidden  = hasRole;
+    $("wiz-steps").hidden = !hasRole;
+    if(r.host) $("host").textContent = r.host;
+
+    const old = $("tab-wiz").querySelector(".badge");
+    if(old) old.remove();
+    if(!hasRole) return;
+
+    const steps = r.steps || [];
+    const doneN = steps.filter(s => s.done).length;
+    const now = steps.findIndex(s => !s.done);
+
+    $("w-title").textContent = r.all_done ? "This Mac is ready" : "Setting up " + r.host;
+    $("w-sub").textContent = r.all_done
+      ? (r.role === "coordinator"
+          ? "Hosting the queue at " + r.root + ". Other Macs can point at it now."
+          : "Connected to " + r.root + ". Open Farm to watch jobs come through.")
+      : (steps[now] ? steps[now].title : "");
+    $("w-prog").style.width = Math.round((doneN / Math.max(steps.length,1)) * 100) + "%";
+    $("w-count").textContent = doneN + "/" + steps.length;
+    $("w-list").replaceChildren(...steps.map((s,i) => stepNode(s, i, i === now)));
+    $("w-finish").textContent = r.all_done ? "Open Farm" : "Skip for now";
+    if(!r.all_done){
+      const bdg = document.createElement("span");
+      bdg.className = "badge"; bdg.textContent = String(steps.length - doneN);
+      $("tab-wiz").append(bdg);
+    }
+  }catch(e){
+    $("w-sub").textContent = errText(e);
+  }finally{ wizBusy = false; }
+}
+$("w-recheck").onclick = wizard;
+$("w-finish").onclick = async () => {
+  try{ await call("finish_wizard"); }catch(e){}
+  openTab("dash");
+};
+
+/* ================= CHECKS ================= */
+
+function chkNode(c){
+  const d = document.createElement("div"); d.className = "chk " + (c.status || "");
+  const g = document.createElement("div"); g.className = "g"; g.textContent = MARK[c.status] || "•";
+  const b = document.createElement("div"); b.className = "b";
+  const l = document.createElement("div"); l.className = "l"; l.textContent = c.label;
+  const dd = document.createElement("div"); dd.className = "d"; dd.textContent = c.detail || "";
+  b.append(l, dd);
+  if(c.fix){ const f = document.createElement("div"); f.className = "fx"; f.textContent = c.fix; b.append(f); }
+  if(c.action){
+    const w = document.createElement("div"); w.style.marginTop = "7px";
+    const btn = document.createElement("button");
+    btn.className = "btn sm"; btn.type = "button"; btn.textContent = c.action_label || "Fix";
+    btn.onclick = async () => {
+      const label = btn.textContent;
+      btn.disabled = true;
+      btn.replaceChildren();
+      const sp = document.createElement("span"); sp.className = "spin";
+      btn.append(sp, document.createTextNode("Working…"));
+      try{ toast(await call("run_action", { action: c.action }), "good"); setTimeout(verify, 1200); }
+      catch(e){ toast(errText(e), "bad"); btn.disabled = false; btn.textContent = label; }
+    };
+    w.append(btn); b.append(w);
+  }
+  d.append(g, b);
+  return d;
+}
+
+let verifying = false;
+async function verify(){
+  if(!rawInvoke || verifying) return;
+  verifying = true;
+  $("b-icon").textContent = "⏳";
+  $("b-title").textContent = "Checking this Mac…";
+  try{
+    const r = await call("verify_link");
+    $("banner").className = "banner " + (r.fail ? "blocked" : (r.warn ? "" : "ready"));
+    $("b-icon").textContent = r.fail ? "❌" : (r.warn ? "⚠️" : "✅");
+    $("b-title").textContent = r.fail
+      ? r.fail + (r.fail === 1 ? " step" : " steps") + " left before this Mac can render"
+      : (r.warn ? "Connected — " + r.warn + " worth a look" : "This Mac is fully set up");
+    $("b-sub").textContent = r.host + (r.is_coordinator ? " · coordinator" : "") + " · " + r.root;
+    if(r.host) $("host").textContent = r.host;
+
+    const groups = [];
+    let cur = null;
+    (r.checks || []).forEach(c => {
+      if(!cur || cur.label !== c.stage_label){ cur = { label:c.stage_label, items:[] }; groups.push(cur); }
+      cur.items.push(c);
+    });
+    $("checks").replaceChildren(...groups.map(g => {
+      const box = document.createElement("div"); box.className = "grp";
+      const h = document.createElement("h2"); h.textContent = g.label;
+      box.append(h, ...g.items.map(chkNode));
+      return box;
+    }));
+  }catch(e){
+    $("b-icon").textContent = "❌";
+    $("b-title").textContent = "Couldn't run the checks";
+    $("b-sub").textContent = errText(e);
+  }finally{ verifying = false; }
+}
+$("b-recheck").onclick = verify;
+
+/* ================= SETTINGS ================= */
+
+function shareUrlPreview(){
+  const name = ($("f-coord").value || "…").trim();
+  const share = ($("f-sharename").value || "RenderFarm").trim();
+  $("h-url").textContent = "smb://" + name + ".local/" + share;
+}
+$("f-coord").addEventListener("input", shareUrlPreview);
+$("f-sharename").addEventListener("input", shareUrlPreview);
+
+async function loadConfig(){
+  if(!rawInvoke) return;
+  try{
+    const r = await call("get_config");
+    const c = r.config || {};
+    $("f-coord").value     = c.coordinator || "";
+    $("f-sharename").value = c.share_name || "RenderFarm";
+    $("f-share").value     = c.share_path || "";
+    $("f-perf").value      = c.perf || "auto";
+    $("f-disk").value      = c.min_free_gb || 15;
+    $("f-repo").value      = c.repo_dir || "";
+    $("f-ltx").value       = c.ltx_dir || "";
+    $("f-share").placeholder = (r.resolved && r.resolved.root) || "/Volumes/RenderFarm";
+    $("f-ltx").placeholder   = (r.resolved && r.resolved.ltx_dir) || "~/video-gen/LTX2-MLX";
+    $("cfgfile").textContent = r.config_file ? "Saved to " + r.config_file : "";
+    shareUrlPreview();
+  }catch(e){ /* the Checks banner already reports a dead backend */ }
+}
+
+$("cfg").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const btn = e.target.querySelector('button[type="submit"]');
+  btn.disabled = true;
+  try{
+    await call("save_config", { cfg: {
+      coordinator: $("f-coord").value.trim(),
+      share_path:  $("f-share").value.trim(),
+      share_name:  ($("f-sharename").value.trim() || "RenderFarm"),
+      perf:        $("f-perf").value,
+      min_free_gb: parseInt($("f-disk").value, 10) || 15,
+      ltx_dir:     $("f-ltx").value.trim(),
+      lora_dir:    "",
+      repo_dir:    $("f-repo").value.trim()
+    }});
+    toast("Saved. The watcher picks up the new folder within 2s.", "good");
+    loadConfig(); verify();
+  }catch(err){ toast(errText(err), "bad"); }
+  finally{ btn.disabled = false; }
+});
+$("btn-mount").onclick = async () => {
+  try{ toast(await call("run_action", { action:"mount_share" }), "good"); setTimeout(verify, 1200); }
+  catch(e){ toast(errText(e), "bad"); }
+};
+
+/* ================= BOOT ================= */
+/* An unconfigured Mac opens on Setup, never on a dashboard of zeroes — looking
+   broken while merely unconfigured was the original complaint. */
+(async () => {
+  moveThumb();
   loadConfig();
-  (async () => {
-    try{
-      const r = await invoke("setup_steps");
-      if (!r.wizard_done || !r.all_done) openTab("wiz"); else openTab("dash");
-    }catch(e){ openTab("wiz"); }
-  })();
   tick();
+  try{
+    const r = await call("setup_steps");
+    openTab((!r.wizard_done || !r.all_done) ? "wiz" : "dash");
+    if(r.host) $("host").textContent = r.host;
+  }catch(e){ openTab("wiz"); }
   setInterval(tick, 2000);
-  // keep the setup view honest while it's open, without hammering shell-outs
-  setInterval(() => { if (tab === "setup" && document.hasFocus()) verify(); }, 15000);
+  setInterval(() => { if(tab === "checks" && document.hasFocus()) verify(); }, 15000);
+})();
 </script>
 </body>
 </html>

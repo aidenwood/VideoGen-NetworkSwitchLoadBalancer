@@ -2,13 +2,20 @@
   "name": "ltx-mac-farm",
   "private": true,
   "version": "0.1.0",
-  "description": "LTX Mac Farm — menubar monitor: tray status + ping notifications",
+  "description": "LTX Mac Farm \u2014 menubar monitor: tray status + ping notifications",
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",
-    "build": "tauri build"
+    "build": "tauri build",
+    "test": "node test/ui.test.js && cd src-tauri && cargo test --quiet",
+    "test:ui": "node test/ui.test.js",
+    "test:shots": "node test/ui.test.js --shots",
+    "selftest": "cd src-tauri && cargo run --release --quiet -- --selftest"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.1.0"
+  },
+  "dependencies": {
+    "playwright": "^1.58.2"
   }
 }

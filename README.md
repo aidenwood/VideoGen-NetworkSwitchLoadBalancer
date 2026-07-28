@@ -400,6 +400,7 @@ heartbeat has gone stale.
 | `promote.sh` | promote cherry-picked test proofs to full hero renders |
 | `farm_status.sh` | counts, in-flight view, per-worker memory, heartbeat-aware `--reap` |
 | `job.sample` | the job file format |
+| `desktop/test/ui.test.js` | 56 UI behaviour tests — stubs the Tauri bridge and drives the real `index.html`. `npm test` in `desktop/` runs it plus the Rust unit tests |
 | `--selftest` | `"/Applications/LTX Mac Farm.app/Contents/MacOS/ltx-mac-farm" --selftest` — checks every wizard action for both roles without clicking anything |
 | `docs/OOM_LIMITS.md` | how much memory a render may use, and what happens when it asks for more |
 | `docs/MEMORY-INCIDENT-2026-07-28.md` | the measured evidence behind those limits |

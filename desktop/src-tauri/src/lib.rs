@@ -1445,9 +1445,15 @@ fn finish_wizard(cfg_state: State<CfgState>) -> Result<(), String> {
 #[tauri::command]
 fn get_state(state: State<SharedState>) -> serde_json::Value {
     let f = state.0.lock().unwrap();
+    // Workers ride along with the 2s poll rather than waiting for a verify
+    // pass: which Macs are up and what they're rendering is the single most
+    // useful thing on the Farm view, and read_workers is only a dir listing —
+    // no shelling out, so it's cheap enough to run every tick.
+    let workers = read_workers(&f.root);
     serde_json::json!({
         "root": f.root,
         "counts": f.counts,
+        "workers": workers,
         "events": f.events.iter().rev().take(60).cloned().collect::<Vec<_>>(),
     })
 }

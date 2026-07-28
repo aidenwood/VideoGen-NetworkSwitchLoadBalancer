@@ -11,23 +11,25 @@ test/hero cherry-pick + LTX Mac Farm menubar app all shipped.
 
 - **P0 · S · Priority lanes** — `--priority high|normal` writes to `queue/hi/` scanned
   first, so a hero shot jumps the sweep backlog instead of waiting behind 200 seeds.
-- **P0 · M · Auto-promote winners** — after a `--test` sweep, a tiny picker (`promote.sh`
-  or a dashboard grid) lets you click the good proof stills; it re-enqueues exactly
-  those seeds as `--hero`. Closes the cherry-pick loop without hand-copying seeds.
+- ~~**P0 · M · Auto-promote winners**~~ — **shipped** as the app's Review tab: the proof
+  stills are a contact sheet and *Render hero* re-enqueues that exact seed at full size.
+  `promote.sh` still exists for the terminal path.
 - **P1 · M · Dependency chains** — a job can declare `NEEDS=<id>` so multi-shot
   sequences (still → i2v → upscale) run in order across the farm.
 - **P1 · S · Fair scheduling** — round-robin per requester so one person's 200-seed
   sweep doesn't starve everyone else's single clips.
-- **P2 · M · Cost/time estimator** — predict wall-clock for a queue given N workers +
-  measured per-shot times; show "ETA 42 min" before you commit a batch.
+- ~~**P2 · M · Cost/time estimator**~~ — **shipped**: per-card estimates and queue ETA come
+  from `done/*.json` (per size + frames + mode), simulated across the Macs that are up, and
+  the overnight planner prices a whole night before you commit it.
 
 ## 2. Reliability & scale
 
 - **P0 · S · Heartbeats** — each worker touches `running/<job>.heartbeat` every 30s;
   `--reap` uses real staleness instead of a flat 45-min guess. Kills false requeues on
   legitimately long hero renders.
-- **P1 · M · Auto-reaper daemon** — fold reaping into a coordinator LaunchAgent so a
-  crashed Mac's job returns to the queue with no human running `--reap`.
+- ~~**P1 · M · Auto-reaper daemon**~~ — **shipped** as the app's autopilot (one Mac holds a
+  heartbeat lock on the share and reaps every minute). A LaunchAgent is still the answer for
+  a Mac that shouldn't run the app at all — or run it with `--serve`.
 - **P1 · S · Per-worker concurrency guard** — a lockfile so a double-launched
   `start_worker` can't run two GPU jobs on one Mac (violates the hard rule).
 - **P1 · M · Cloud burst** — when the local queue depth > threshold, spill overflow
@@ -51,9 +53,58 @@ test/hero cherry-pick + LTX Mac Farm menubar app all shipped.
   `farm.conf` lines to paste.
 - **P1 · S · Feed measured peaks back into pricing** — every sidecar now records
   `peak_mem_gb`; refit the coefficients from `done/*.json` periodically instead of
-  trusting a static estimate.
+  trusting a static estimate. *(The app now surfaces the "renders over their memory budget"
+  count from those sidecars, which is the signal to refit — the refit itself is still manual.)*
 
 ## 3. LTX Mac Farm app (the menubar UI)
+
+> ### ✅ Shipped
+> - **Settings / Connection page** — the Setup + Checks views: role-aware guided setup,
+>   live per-step ✅/⚠️/❌, persisted config (JSON in app data, hot-reloaded by the watcher),
+>   mount helper, tray entry. `--selftest` drives every path headlessly.
+> - **Enqueue from the app** — the Board's composer (prompt, name, delivery size,
+>   hero-vs-proof, seed sweep, priority). Written natively, byte-compatible with
+>   `enqueue.sh`, prompts escape-hardened.
+> - **Per-worker rows** — the Team view: person, Mac model, RAM, role, profile, current job
+>   + elapsed, finished count, memory pressure/swap, and flags for *no worker running* /
+>   *app not running*. Fed by `presence/<host>.json` + `.worker.<HOST>.info` + heartbeats.
+> - **Web gateway** — the same UI served over HTTP (127.0.0.1 by default, LAN opt-in with a
+>   32-hex key), auto-opened on launch, plus `--serve` for headless Macs. One
+>   `Core::dispatch` behind both surfaces, so neither can drift.
+> - **Job board** — kanban lanes with drag-to-reorder (renames the job file, because claim
+>   order *is* filename order), priority lane, cancel, requeue, run-again, in-browser
+>   playback/download of finished clips, and log viewing on failures.
+> - **Variant recommendations** — other delivery sizes, prompt edits, seed sweeps and proof
+>   stills offered per card; ticking them queues complete jobs.
+> - **Thumbnail previews** — poster frames (ffmpeg, cached in `done/.thumbs/`) on the board,
+>   and a proof-still contact sheet in the Review tab with one-click *Render hero*: the
+>   cherry-pick loop, in the browser.
+> - **Review states** — approve / needs-another-take per clip in `reviews/<ID>.json`;
+>   autopilot never auto-retries a clip a human has claimed.
+> - **Board at scale** — search, filters (size / Mac / run / review), multi-select bulk
+>   actions, keyboard control, and per-card estimates + queue ETA from this farm's own
+>   sidecar history.
+> - **Overnight runs** — paste a shot list → N prompts × sizes × takes queued as one named
+>   run, prompt-major, with the size of the night shown before committing; morning report
+>   per run (what landed, what failed, who rendered what, what's approved).
+> - **Autopilot** — one Mac babysits: reaps stalled jobs, retries failures, handles OOM by
+>   asking for a bigger Mac or shrinking the job, pauses the queue on a failure streak,
+>   logs everything to `logs/autopilot.log`.
+> - **Ops without Terminal** — reap, pause/resume (via `queue/hold/`), and a validated
+>   `farm.conf` editor that changes every Mac at once.
+> - **Stats** — clips per Mac, average by delivery size, renders over their memory budget.
+> - **i2v + LoRA + uploads + presets** — drop an image to upload into `assets/`, pick LoRAs
+>   off the share, save composer setups.
+> - **Phone** — installable web manifest + icon, and opt-in browser notifications.
+> - **React port** — the UI is React 19 + TypeScript + Vite (`desktop/ui-react`), embedded
+>   into the binary by `build.rs` and served to both surfaces. The command surface is typed
+>   end to end: `commands.ts` is checked against Rust's `COMMANDS` by a cargo test and by
+>   `--selftest`, so a dead button is a compile error or a failed test rather than a
+>   support call. The 223-check behaviour suite was kept green through the port by
+>   preserving every DOM id — the port is verified behaviour-preserving, not just
+>   "looks the same".
+>
+> Still open below: sound preferences, tray mini-stats, auto-assembly.
 
 - **P0 · M · Settings / Connection page** — a "Setup & Verify" view in the app so nobody
   reverse-engineers the network from the README. Two halves:

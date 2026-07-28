@@ -16,6 +16,10 @@ desktop/node_modules/
 desktop/dist/
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
+# the frontend: source is tracked, deps and the build are not. dist/ is embedded
+# into the binary at compile time (build.rs), so it's a build artifact like target/.
+desktop/ui-react/node_modules/
+desktop/ui-react/dist/
 
 # macOS
 .DS_Store

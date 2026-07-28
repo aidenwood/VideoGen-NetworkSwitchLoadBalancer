@@ -192,12 +192,11 @@ claiming jobs.
 
 ---
 
-## Stage 5 — (optional) the menubar app
+## Stage 5 — the app (menubar + browser)
 
-`desktop/` is a native macOS menubar app (**LTX Mac Farm**, Tauri) that watches the
-share and gives everyone **live tray status + a ping sound** each time a job is
-dispatched, picked up, or finished — so you know the farm's working without
-staring at a terminal.
+`desktop/` is a native macOS app (**LTX Mac Farm**, Tauri). It lives in the menubar,
+and it also **serves the same interface in a browser** so the whole team can use the
+farm without touching Terminal or mounting anything.
 
 **Easiest:** download the prebuilt `.dmg` from the
 **[latest release](https://github.com/aidenwood/VideoGen-NetworkSwitchLoadBalancer/releases/latest)**,
@@ -206,9 +205,104 @@ drag **LTX Mac Farm** into `/Applications`, open it.
 **Or build it yourself:**
 
 ```bash
-cd desktop && npm install && npm run tauri build
+cd desktop && npm install && npm run build
 # → creates "LTX Mac Farm.app" and a .dmg in
 #   desktop/src-tauri/target/release/bundle/
+```
+
+Five views, all of them live off the shared folder:
+
+| View | What you get |
+|---|---|
+| **Setup** | this Mac's remaining steps, each with a button that does it |
+| **Farm** | counts, the queue lane, recent pings, runs, and this farm's own numbers |
+| **Board** | the queue as a kanban board — see below |
+| **Review** | proof stills + finished clips: approve, send back, or render the winner |
+| **Team** | who's connected, whose Mac is rendering what, right now |
+| **Checks** | ✅/⚠️/❌ per setup step, farm-wide limits, operations, autopilot, gateway |
+
+### The job board
+
+The pipeline as four lanes — **Queued → Rendering → Done → Failed**:
+
+- **Drag to reorder** what renders next. Claim order is filename order on the share, so
+  dragging genuinely re-prioritises the farm (it renames the job file) — nothing cosmetic.
+- **↑ Priority** drops a job into `queue/hi/`, which every worker scans first.
+- **Queue a clip** from the board: prompt, delivery size, hero-vs-proof, seed sweep.
+- **Watch or download** a finished clip straight from the browser — no SMB mount needed
+  to review a render.
+- **Requeue** a failed job (its log is one click away), or **run a finished one again**.
+- **Variants…** on any card offers the same shot at the other delivery sizes, a few
+  prompt edits (golden hour, storm mood, slow push in…), a 4-seed sweep, or a cheap proof
+  still. Tick what you want → the farm renders them next.
+- **Search and filter** by prompt, size, Mac, run or review state, **select several cards**
+  for bulk work, and drive it from the keyboard (`/` search, `a` select, `p` priority,
+  `x` remove, `r` requeue, `1`–`6` views).
+- Every card shows **who queued it**, which **run** it belongs to, roughly **how long it
+  takes on your farm**, and when it should start — measured from your own finished renders,
+  not guessed.
+- Image-to-video and LoRA jobs too: **drop an image onto the page** to upload it to
+  `assets/`, pick a LoRA off the share, save a setup as a **preset**.
+
+### Plan an overnight run, review it in the morning
+
+Paste a shot list — one prompt per line — pick your delivery sizes and how many takes,
+and the board tells you the size of the night *before* you commit it (jobs × roughly how
+long across however many Macs are up). Everything gets tagged with one run name.
+
+Choose **proofs** and the night renders cheap stills instead: in the morning, the Review
+tab is a contact sheet, and one click on a winner queues its full render. That's the
+cherry-pick loop the README describes, without the terminal.
+
+**Autopilot** (off by default, one Mac only — Checks → Overnight autopilot) is what makes
+it unattended. It requeues jobs whose Mac died, retries a failure once, and on a memory
+kill either asks for a bigger Mac or shrinks the job. If several jobs fail in a row it
+**pauses the whole queue** rather than burning the rest of the night, and everything it
+does goes to `logs/autopilot.log`. It only ever requeues work — it never deletes a job.
+
+When a run finishes you get a notification with the tally, and **Report** on the Farm view
+opens the morning digest: what landed, what failed (as cards you can act on), who rendered
+what, and what's been approved.
+
+### Run the farm without Terminal
+
+The Checks tab also has:
+
+- **Reap** — requeue jobs whose worker died (what `farm_status.sh --reap` does).
+- **Pause / Resume** — hold every waiting job; anything mid-render finishes normally.
+- **Farm-wide limits** — edit `farm.conf` on the share, so every Mac picks the change up
+  within one poll. Values are validated before they're written (that file is `source`d by
+  bash on every worker).
+- **This farm's numbers** — clips per Mac, average time per delivery size, and how many
+  renders peaked above their memory budget. That last number is what to tune
+  `MEM_BUDGET_PCT` against instead of guessing.
+
+### The web gateway (open it in a browser)
+
+Every copy of the app serves its UI over HTTP. The tray menu has both links:
+
+```
+Open in browser    http://127.0.0.1:8787/?k=<key>       ← this Mac
+Copy team link     http://<host>.local:8787/?k=<key>    ← anyone on the office LAN
+```
+
+It opens automatically when the app launches (turn that off in Settings → Web gateway),
+and both surfaces share one live state — change a setting in the menubar and an open
+browser tab follows within ~2 seconds.
+
+⚠️ **Before you turn on LAN sharing, read this.** Sharing over the network means anyone
+who has that link can queue renders and run setup steps on that Mac. It's off by default:
+until you tick it, the gateway only answers on the Mac itself. Only enable it on an office
+network you trust, share the link with your team directly, and don't post it anywhere
+public or forward the port to the internet.
+
+On a phone, the browser view can be added to the home screen, and the bell in the header
+turns on a notification as each render lands.
+
+For a Mac nobody sits at (a render node in a cupboard), run the gateway on its own:
+
+```bash
+"/Applications/LTX Mac Farm.app/Contents/MacOS/ltx-mac-farm" --serve
 ```
 
 Details in [`desktop/README.md`](desktop/README.md).

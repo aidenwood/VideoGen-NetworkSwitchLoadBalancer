@@ -4,7 +4,10 @@
   "version": "0.1.0",
   "identifier": "design.aidxn.ltx-mac-farm",
   "build": {
-    "frontendDist": "../ui"
+    "frontendDist": "../ui-react/dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm --prefix ../ui-react run dev",
+    "beforeBuildCommand": "npm --prefix ../ui-react run build"
   },
   "app": {
     "withGlobalTauri": true,
@@ -25,7 +28,10 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
+    "targets": [
+      "app",
+      "dmg"
+    ],
     "category": "Utility",
     "shortDescription": "Render Farm menubar monitor",
     "icon": [

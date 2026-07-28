@@ -7,9 +7,11 @@
     "tauri": "tauri",
     "dev": "tauri dev",
     "build": "tauri build",
-    "test": "node test/ui.test.js && cd src-tauri && cargo test --quiet",
-    "test:ui": "node test/ui.test.js",
-    "test:shots": "node test/ui.test.js --shots",
+    "ui": "npm --prefix ui-react run dev",
+    "ui:build": "npm --prefix ui-react run build",
+    "test": "npm run ui:build && node test/ui.test.js && cd src-tauri && cargo test --quiet",
+    "test:ui": "npm run ui:build && node test/ui.test.js",
+    "test:shots": "npm run ui:build && node test/ui.test.js --shots",
     "selftest": "cd src-tauri && cargo run --release --quiet -- --selftest"
   },
   "devDependencies": {

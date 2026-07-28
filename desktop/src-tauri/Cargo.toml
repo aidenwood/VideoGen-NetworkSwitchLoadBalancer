@@ -17,6 +17,10 @@ tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The web gateway (src/web.rs). Blocking + tiny on purpose: everything else in
+# this app is synchronous shelling-out, so an async runtime would be a whole
+# second execution model for four endpoints.
+tiny_http = "0.12"
 
 [profile.release]
 opt-level = "s"

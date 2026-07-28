@@ -414,7 +414,7 @@
         }
         // These two shell out to the repo's scripts, so give an escape hatch
         // for when auto-detection can't find where you cloned it.
-        if (s.id === "toolchain" || s.id === "models"){
+        if (s.id === "toolchain" || s.id === "models" || s.id === "stage"){
           const pick = document.createElement("button");
           pick.className = "small";
           pick.type = "button";

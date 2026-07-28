@@ -131,8 +131,20 @@ the coordinator, then every worker pulls them off the fast switch in minutes.
 FARM_ROOT=/Volumes/RenderFarm ./seed_farm_assets.sh
 ```
 
-This copies every model + LoRA in `MANIFEST.txt` into
-`/Volumes/RenderFarm/{models,loras}` on the share.
+This publishes every model + LoRA in `MANIFEST.txt` into
+`$FARM_ROOT/{models,loras}` on the share.
+
+> **It does not duplicate the models.** They're ~87GB, and on the coordinator the
+> share sits on the same disk as the HuggingFace cache — so copying would burn
+> 87GB on files already there. When source and destination share a volume this
+> **hardlinks**: the share gets its own directory entries pointing at the same
+> data. Measured on the real 87GB set: **0.68s, 67MB used.** Workers reading it
+> over SMB can't tell the difference, and it's safe because HF blobs are
+> content-addressed and never modified in place.
+>
+> Across volumes (a real external/NAS share) it falls back to rsync, since
+> hardlinks can't span filesystems. `--copy` forces real copies; `--dry-run`
+> shows what it would do.
 
 **3b — On each worker:** handled automatically by `setup.command` in Stage 4
 (it runs `provision.command` for you). You don't do anything extra here.

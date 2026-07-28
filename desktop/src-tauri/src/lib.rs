@@ -1371,9 +1371,10 @@ fn setup_steps_for(cfg: &Config) -> serde_json::Value {
             .collect::<Vec<_>>()
             .is_empty();
         push(&mut steps, "stage", "Put the models on the share",
-            "Copies this Mac's models + LoRAs into the shared folder, so the other Macs \
-             pull them over the switch in minutes instead of re-downloading ~60GB from \
-             HuggingFace. One click; it follows MANIFEST.txt.",
+            "Publishes this Mac's models + LoRAs to the shared folder so the other Macs \
+             pull them over the switch instead of re-downloading ~87GB from HuggingFace. \
+             The share is on the same disk, so this HARDLINKS rather than copying — \
+             seconds, and no second copy of the models. Follows MANIFEST.txt.",
             staged,
             if staged { format!("Models staged in {}/models", root) }
             else if has_local_models { "Ready to stage — models are in this Mac's cache".into() }

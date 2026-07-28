@@ -30,6 +30,8 @@ FARM_ROOT="${FARM_ROOT:-/Volumes/RenderFarm}"
 ROOT_DIR="${ROOT_DIR:-/Users/aidenwood/Desktop/00 - Aidxn/Social Video Creation}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 MANIFEST="$HERE/MANIFEST.txt"
+# shellcheck disable=SC1091
+. "$HERE/farm_root.sh"     # for $RSYNC_PROGRESS (macOS openrsync compatibility)
 
 MODE="link"; DRY=0
 while [ $# -gt 0 ]; do case "$1" in
@@ -81,7 +83,7 @@ stage_dir(){
     esac
     cp -al "$src" "$dest_parent/" || { echo "    !! hardlink failed — falling back to copy"; rsync -a "$src" "$dest_parent/"; }
   else
-    rsync -a --info=progress2 "$src" "$dest_parent/"
+    rsync -a $RSYNC_PROGRESS "$src" "$dest_parent/"
   fi
 }
 

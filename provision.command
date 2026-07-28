@@ -11,25 +11,39 @@ LORA_DIR="${LORA_DIR:-$HOME/farm-loras}"
 HF_HUB="$HOME/.cache/huggingface/hub"
 cd "$(dirname "$0")"
 
-[ -d "$FARM_ROOT" ] || { echo "!! share not mounted at $FARM_ROOT — connect it first (smb://COORDINATOR.local/RenderFarm)"; read -r _; exit 1; }
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "$0")" && pwd)/farm_root.sh"
+ensure_farm_root || { read -r -t 30 _ || true; exit 1; }
 MANIFEST="$FARM_ROOT/MANIFEST.txt"; [ -f "$MANIFEST" ] || MANIFEST="./MANIFEST.txt"
 
 mkdir -p "$HF_HUB" "$LORA_DIR"
 echo "Provisioning $(scutil --get LocalHostName 2>/dev/null || hostname -s) from $FARM_ROOT ..."
 
-# models (HF hub cache) — copy from share/models into local HF cache
+# models (HF hub cache) — copy from share/models into local HF cache.
+# On the COORDINATOR the share's models are hardlinks to this very cache, so
+# there is nothing to pull; comparing inodes catches that without guessing.
 if [ -d "$FARM_ROOT/models" ]; then
   for m in "$FARM_ROOT"/models/models--*; do
     [ -e "$m" ] || continue
-    echo "  model: $(basename "$m")"
-    rsync -a --info=progress2 "$m" "$HF_HUB/"
+    name="$(basename "$m")"
+    src_ino="$(find "$m" -type f -print -quit 2>/dev/null)"
+    if [ -n "$src_ino" ] && [ -e "$HF_HUB/$name" ]; then
+      a="$(stat -f '%d:%i' "$src_ino" 2>/dev/null)"
+      b="$(stat -f '%d:%i' "${src_ino/#$FARM_ROOT\/models/$HF_HUB}" 2>/dev/null)"
+      if [ -n "$a" ] && [ "$a" = "$b" ]; then
+        echo "  model: $name — already the same files on this Mac (hardlinked), skipping"
+        continue
+      fi
+    fi
+    echo "  model: $name"
+    rsync -a $RSYNC_PROGRESS "$m" "$HF_HUB/"
   done
 fi
 
 # LoRAs — copy from share/loras into the local farm LoRA dir
 if [ -d "$FARM_ROOT/loras" ]; then
   echo "  loras -> $LORA_DIR"
-  rsync -a --info=progress2 "$FARM_ROOT"/loras/ "$LORA_DIR/"
+  rsync -a $RSYNC_PROGRESS "$FARM_ROOT"/loras/ "$LORA_DIR/"
 fi
 
 # --- memory/OOM control files ----------------------------------------------
@@ -71,7 +85,7 @@ if [ -f ./farm_mem.sh ]; then
   . ./farm_mem.sh
   _perf="${PERF:-auto}"
   if [ "$_perf" = "auto" ]; then _perf="$(mem_auto_perf)"; fi
-  echo "    this Mac: $(mem_total_gb)GB RAM · tier $(mem_tier) · profile $_perf · budget $(( $(mem_budget_bytes "$_perf") / 1024/1024/1024 ))GB"
+  echo "    this Mac: $(mem_total_gb)GB RAM · tier $(mem_tier) · profile $_perf · budget $(mem_budget_gb)GB"
   if [ "$(mem_total_gb)" -le 8 ]; then
     echo "    ⚠️  8GB or less — hero video renders will likely OOM. See docs/OOM_LIMITS.md."
   fi

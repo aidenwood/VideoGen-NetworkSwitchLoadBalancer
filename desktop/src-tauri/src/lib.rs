@@ -1698,6 +1698,30 @@ pub fn selftest() -> i32 {
         r.ok("Bonjour finds an SMB host", &hosts.join(", "));
     }
 
+    // Script-level checks. Both of these shipped as real bugs: the literal
+    // "COORDINATOR.local" placeholder (each script had its own copy of the
+    // mount logic, so fixing one missed the others), and --info=progress2,
+    // which macOS's openrsync rejects outright rather than ignoring.
+    if let Some(dir) = &repo {
+        println!("\n\x1b[1m── scripts ──\x1b[0m");
+        for f in ["start_worker.command", "setup.command", "provision.command", "seed_farm_assets.sh"] {
+            let path = format!("{}/{}", dir, f);
+            let body = std::fs::read_to_string(&path).unwrap_or_default();
+            if body.is_empty() { r.bad(&format!("readable: {}", f), &path); continue; }
+            r.check(!body.contains("COORDINATOR.local"),
+                &format!("{}: no hardcoded coordinator", f),
+                if body.contains("COORDINATOR.local") { "still has the smb://COORDINATOR.local placeholder" } else { "ok" });
+            r.check(!body.contains("--info=progress2"),
+                &format!("{}: rsync flag is portable", f),
+                if body.contains("--info=progress2") { "openrsync on macOS rejects --info=progress2" } else { "ok" });
+        }
+        // and the shared helper must exist and actually be sourced
+        let helper = format!("{}/farm_root.sh", dir);
+        r.check(Path::new(&helper).exists(), "farm_root.sh present", &helper);
+        let rp = sh("rsync --info=progress2 --version >/dev/null 2>&1 && echo gnu || echo openrsync");
+        r.ok("rsync flavour detected", rp.trim());
+    }
+
     // Both roles, regardless of how this Mac is currently configured.
     for role in ["coordinator", "worker"] {
         let mut c = base.clone();

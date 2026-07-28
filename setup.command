@@ -16,7 +16,7 @@ set -uo pipefail
 
 # --- config: change these if your setup differs ---------------------------
 export FARM_ROOT="${FARM_ROOT:-/Volumes/RenderFarm}"
-COORDINATOR="${COORDINATOR:-COORDINATOR}"                 # the host Mac's name -> smb://<name>.local/RenderFarm
+COORDINATOR="${COORDINATOR:-}"   # the host Mac's name (workers only); the app fills this in
 WORKDIR="${WORKDIR:-$HOME/video-gen}"                      # where the toolchain gets installed
 LTX_REPO="${LTX_REPO:-https://github.com/dgrauet/ltx-2-mlx.git}"
 export LTX_DIR="${LTX_DIR:-$WORKDIR/LTX2-MLX}"
@@ -59,19 +59,20 @@ if ! command -v mflux-generate-z-image-turbo >/dev/null 2>&1; then
 fi
 command -v mflux-generate-z-image-turbo >/dev/null 2>&1 && ok "mflux ready" || warn "mflux not on PATH (test/LoRA jobs will fail until installed)"
 
-# 5) mount the share + provision -------------------------------------------
-say "shared folder"
-if [ ! -d "$FARM_ROOT" ]; then
-  warn "share not mounted — opening it, approve in Finder..."
-  open "smb://$COORDINATOR.local/RenderFarm" || true
-  printf "   press Return once it's mounted at %s ... " "$FARM_ROOT"; read -r _
-fi
+# 5) farm folder + provision ------------------------------------------------
+# Role-aware: the coordinator hosts a local folder (created if missing), a
+# worker mounts the coordinator's share. Shared with the other scripts so this
+# logic can't drift out of sync again.
+say "farm folder"
+# shellcheck disable=SC1091
+. "$HERE/farm_root.sh"
+ensure_farm_root || true
 if [ -d "$FARM_ROOT" ]; then
-  ok "share mounted"
+  ok "farm folder ready: $FARM_ROOT"
   say "provisioning models + LoRAs from the share"
   FARM_ROOT="$FARM_ROOT" LTX_DIR="$LTX_DIR" LORA_DIR="$LORA_DIR" bash "$HERE/provision.command" || warn "provision hit an issue — see above"
 else
-  warn "share still not mounted — mount it, then run provision.command"
+  warn "no farm folder at $FARM_ROOT — sort that, then run provision.command"
 fi
 
 # write this Mac's launcher defaults so start_worker.command just works ------

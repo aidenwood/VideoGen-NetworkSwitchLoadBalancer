@@ -47,52 +47,10 @@ export LTX_DIR
 cd "$(dirname "$0")"
 
 # --- get to a usable FARM_ROOT ---------------------------------------------
-# The coordinator HOSTS the folder, so there is nothing to mount — mounting is
-# a worker-only step. Deciding that by "is it already a directory?" also means
-# a worker with the share already mounted skips straight through.
-if [ ! -d "$FARM_ROOT" ]; then
-  case "$FARM_ROOT" in
-    /Volumes/*)
-      host="$(printf '%s' "$COORDINATOR" | tr -cd 'A-Za-z0-9._-')"
-      share="$(basename "$FARM_ROOT")"
-      if [ -z "$host" ] || [ "$host" = "COORDINATOR" ]; then
-        cat <<EOF
-!! Don't know which Mac to connect to.
-
-   FARM_ROOT is $FARM_ROOT but COORDINATOR isn't set, so there's no server to
-   mount. Fix it in ONE of these ways:
-
-     * Open the LTX Mac Farm app -> Setup, and pick the coordinator from the
-       list (it finds them automatically). Then press "Start worker" there.
-     * Or run this with the name set:
-         COORDINATOR=<mac-name> "$0"
-
-   If this Mac IS the coordinator, FARM_ROOT should be its own folder
-   (e.g. \$HOME/$share), not a path under /Volumes.
-EOF
-        read -r -t 30 _ || true
-        exit 1
-      fi
-      echo "Share not mounted — connecting to smb://$host.local/$share ..."
-      open "smb://$host.local/$share"
-      echo "Approve the mount in Finder, then press Return here to continue..."
-      read -r _
-      ;;
-    *)
-      # A local path that doesn't exist yet: this is the coordinator's own
-      # folder, so just make it rather than failing.
-      echo "Creating farm folder $FARM_ROOT ..."
-      mkdir -p "$FARM_ROOT" || {
-        echo "!! Couldn't create $FARM_ROOT"; read -r -t 30 _ || true; exit 1; }
-      ;;
-  esac
-fi
-
-[ -d "$FARM_ROOT" ] || {
-  echo "!! Still no farm folder at $FARM_ROOT — nothing to do."
-  read -r -t 30 _ || true; exit 1; }
-
-echo "farm: $FARM_ROOT"
+# Shared with setup.command and provision.command — see farm_root.sh.
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "$0")" && pwd)/farm_root.sh"
+ensure_farm_root || { read -r -t 30 _ || true; exit 1; }
 
 # keep the whole worker awake + run it
 exec caffeinate -ims ./farm_worker.sh

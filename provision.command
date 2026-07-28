@@ -32,6 +32,51 @@ if [ -d "$FARM_ROOT/loras" ]; then
   rsync -a --info=progress2 "$FARM_ROOT"/loras/ "$LORA_DIR/"
 fi
 
+# --- memory/OOM control files ----------------------------------------------
+# Split by kind, deliberately:
+#   farm.conf            CONFIG — lives on the share, edited once, read live by
+#                        every worker each poll. Never overwritten if present.
+#   farm_mem.sh          CODE   — must be local so a flaky SMB mount can't take
+#   farm_sitecustomize/  CODE     the guards down mid-render. Newest wins.
+# Net effect: tuning a limit is a one-file edit on the coordinator; shipping a
+# code fix is one re-run of this script per Mac.
+echo "  memory/OOM control files"
+if [ ! -f "$FARM_ROOT/farm.conf" ] && [ -f ./farm.conf ]; then
+  cp ./farm.conf "$FARM_ROOT/farm.conf"
+  echo "    published farm.conf to the share (farm-wide limits live there now)"
+elif [ -f "$FARM_ROOT/farm.conf" ]; then
+  echo "    farm.conf already on the share — left alone (it is the authority)"
+fi
+# code: seed the share from this checkout, then take the newer of the two.
+# NOTE the `|| true` on every line — this script runs under `set -e`, and a
+# short-circuited `a && b` list returns non-zero, which is enough to abort the
+# whole provision in some positions. Skipping a copy must never be fatal.
+for f in farm_mem.sh; do
+  if [ -f "./$f" ] && [ ! -f "$FARM_ROOT/$f" ]; then cp "./$f" "$FARM_ROOT/$f" || true; fi
+  if [ -f "$FARM_ROOT/$f" ]; then rsync -au "$FARM_ROOT/$f" "./$f" || true; fi
+done
+if [ -d ./farm_sitecustomize ] && [ ! -d "$FARM_ROOT/farm_sitecustomize" ]; then
+  rsync -a ./farm_sitecustomize/ "$FARM_ROOT/farm_sitecustomize/" || true
+fi
+if [ -d "$FARM_ROOT/farm_sitecustomize" ]; then
+  rsync -au "$FARM_ROOT"/farm_sitecustomize/ ./farm_sitecustomize/ || true
+fi
+chmod +x ./farm_mem.sh 2>/dev/null || true
+
+# report what THIS Mac will actually do, so a bad tier is obvious at setup time
+# shellcheck disable=SC1091
+if [ -f ./farm_mem.sh ]; then
+  # shellcheck disable=SC1090
+  [ -f "$FARM_ROOT/farm.conf" ] && . "$FARM_ROOT/farm.conf"
+  . ./farm_mem.sh
+  _perf="${PERF:-auto}"
+  if [ "$_perf" = "auto" ]; then _perf="$(mem_auto_perf)"; fi
+  echo "    this Mac: $(mem_total_gb)GB RAM · tier $(mem_tier) · profile $_perf · budget $(( $(mem_budget_bytes "$_perf") / 1024/1024/1024 ))GB"
+  if [ "$(mem_total_gb)" -le 8 ]; then
+    echo "    ⚠️  8GB or less — hero video renders will likely OOM. See docs/OOM_LIMITS.md."
+  fi
+fi
+
 # sanity: is the LTX tool importable?
 LTX_DIR="${LTX_DIR:-/Users/aidenwood/Desktop/00 - Aidxn/Social Video Creation/LTX2-MLX}"
 if [ -x "$LTX_DIR/.venv/bin/ltx-2-mlx" ]; then

@@ -78,8 +78,12 @@ fi
 say "done"
 cat <<EOF
 This Mac is set up. To join the farm:
-  1. Open start_worker.command, check FARM_ROOT / LTX_DIR / PERF near the top.
+  1. Open start_worker.command, check FARM_ROOT / LTX_DIR near the top.
   2. Double-click start_worker.command.
+
+Memory limits are NOT set here — they come from $FARM_ROOT/farm.conf on the
+coordinator, and this Mac sizes them against its own RAM automatically. Edit
+that one file to retune the whole farm. Background: docs/OOM_LIMITS.md
 Toolchain: $LTX_DIR   |   LoRAs: $LORA_DIR   |   Share: $FARM_ROOT
 EOF
 read -r -t 8 _ || true

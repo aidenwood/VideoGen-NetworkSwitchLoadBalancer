@@ -6,6 +6,10 @@ failed/
 assets/
 models/
 loras/
+logs/
+
+# per-Mac limit overrides live on the share, never in git
+farm.conf.*
 
 # tauri / node / rust build output
 desktop/node_modules/

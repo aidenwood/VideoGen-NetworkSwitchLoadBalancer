@@ -27,7 +27,7 @@ FARM_ROOT="${FARM_ROOT:-/Volumes/RenderFarm}"
 QUEUE="$FARM_ROOT/queue"; mkdir -p "$QUEUE"
 
 ID=""; TYPE="t2v"; PROMPT=""; IMAGE=""; WIDTH=1080; HEIGHT=1920; FRAMES=97; SEED=42; FPS=24; EXTRA=""; SWEEP=0
-LORA=""; LORA_SCALE="1.0"; STILL_PROMPT=""; PERF=""; MODE=""; PRIORITY="normal"
+LORA=""; LORA_SCALE="1.0"; STILL_PROMPT=""; PERF=""; MODE=""; PRIORITY="normal"; MIN_RAM_GB=0
 while [ $# -gt 0 ]; do case "$1" in
   --id)          ID="$2"; shift 2;;
   --type)        TYPE="$2"; shift 2;;
@@ -48,6 +48,7 @@ while [ $# -gt 0 ]; do case "$1" in
   --extra)       EXTRA="$2"; shift 2;;
   --sweep)       SWEEP="$2"; shift 2;;
   --priority)    PRIORITY="$2"; shift 2;;
+  --min-ram)     MIN_RAM_GB="$2"; shift 2;;   # only Macs with >= this many GB may claim it
   --hi)          PRIORITY="high"; shift;;
   *) echo "unknown arg: $1"; exit 1;;
 esac; done
@@ -85,6 +86,7 @@ write_job(){
     echo "SEED=$seed"; echo "FPS=$FPS"; echo "EXTRA=\"$EXTRA\""
     echo "MODE=\"$MODE\""
     [ -n "$PERF" ] && echo "PERF=\"$PERF\""
+    [ "$MIN_RAM_GB" -gt 0 ] 2>/dev/null && echo "MIN_RAM_GB=$MIN_RAM_GB"
   } > "$f"
   echo "queued: $(basename "$f")  (seed=$seed mode=$MODE${PERF:+ perf=$PERF}$([ "$PRIORITY" = "high" ] && echo " [HIGH PRIORITY]"))"
 }

@@ -35,6 +35,23 @@ test/hero cherry-pick + LTX Mac Farm menubar app all shipped.
   for spikes.
 - **P2 · S · Disk guard** — worker refuses a job if free space < model + output headroom,
   instead of OOM/ENOSPC mid-render.
+- ~~**P0 · L · RAM-aware admission control + farm-wide OOM limits**~~ — **shipped**,
+  implementing `docs/MEMORY-INCIDENT-2026-07-28.md` §4–5. Workers detect `hw.memsize`,
+  budget to 90%, **price each job before claiming it** and release anything they can't
+  afford back to the queue for a bigger Mac; `MIN_RAM_GB` (`enqueue.sh --min-ram`) pins
+  a job to big machines; rc=137 requeues with a raised floor and a 90s drain instead of
+  dying in `failed/`; `PERF=auto` gates `full` to 64GB. All of it configured from ONE
+  file on the share (`farm.conf`), reloaded every poll. Also corrected the profile peak
+  numbers, which were 3–5× too low, and fixed a bash 3.2 `set -u` empty-array bug that
+  was killing every `t2v` job before it started. See `docs/OOM_LIMITS.md`.
+- **P0 · S · Measure the video memory curve** — `./measure_peak.sh` on the 64GB Mac.
+  The video coefficient is still **extrapolated**, which prices hero 1080×1920 at ~49GB
+  and reserves it for the one 64GB machine. If the real number is lower, that guess is
+  costing three Macs' worth of hero throughput. The script fits the curve and prints the
+  `farm.conf` lines to paste.
+- **P1 · S · Feed measured peaks back into pricing** — every sidecar now records
+  `peak_mem_gb`; refit the coefficients from `done/*.json` periodically instead of
+  trusting a static estimate.
 
 ## 3. LTX Mac Farm app (the menubar UI)
 

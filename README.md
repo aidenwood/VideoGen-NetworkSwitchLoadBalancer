@@ -160,9 +160,10 @@ it rendering too). This is the two-double-clicks part.
 3. **Double-click `setup.command`.** It installs the whole toolchain (Homebrew,
    uv, the LTX2-MLX runtime, mflux) and pulls the models off the share.
    **~15–30 min, mostly unattended.** It prints what it's doing as it goes.
-4. **Set this Mac's speed profile.** Open `start_worker.command`, set
-   `export PERF=full` (a spare/dedicated Mac) or `export PERF=light` (someone's
-   daily-driver — stays usable while rendering). See
+4. **Nothing to set for speed or memory.** The worker sizes itself to this Mac's
+   RAM (`PERF=auto`) and takes its limits from `farm.conf` on the share. Only
+   come back here if this *one* Mac must differ — and even then, prefer a
+   `farm.conf.<hostname>` on the share. See
    [Performance profiles](#performance-profiles--full-vs-light) below.
 5. **Double-click `start_worker.command`.** The Mac is now in the farm, pulling
    jobs. Leave the window open — closing it stops that worker.
@@ -171,8 +172,11 @@ it rendering too). This is the two-double-clicks part.
 claiming jobs.
 
 > **Safety:** a Mac won't run two render jobs at once (a lockfile enforces the
-> one-GPU-job rule), and it pauses instead of crashing if the disk gets too full
-> (`MIN_FREE_GB`, default 15GB).
+> one-GPU-job rule); it pauses instead of crashing if the disk gets too full
+> (`MIN_FREE_GB`, default 15GB); and it won't *claim* a job at all while it's
+> short on RAM — the job stays queued for a healthier Mac rather than dragging
+> that one into swap. Sizing is automatic per machine; see
+> [`docs/OOM_LIMITS.md`](docs/OOM_LIMITS.md).
 
 ---
 
@@ -268,19 +272,81 @@ that actually stopped gets its job requeued.
 
 ## Performance profiles — `full` vs `light`
 
-Set per Mac in `start_worker.command` (`export PERF=...`), or override per job
-with `--perf`:
+| Profile | Flags | Use on |
+|---|---|---|
+| **auto** | picks one of the below from installed RAM | **the default — leave it** |
+| **full** | no `--low-ram`, no tiling, `nice -5` | **64GB Macs only** |
+| **light** | `--low-ram --tile-frames 2`, `nice -15` | everything smaller |
 
-| Profile | Flags | Use on | Feel |
+`auto` reads each Mac's own `hw.memsize`, so you never have to remember which
+machine is which.
+
+> ### ⚠️ The old numbers in this table were wrong
+> This table used to claim `full` peaks ~10–16GB and `light` stays in "low
+> single-digit GB". **Both were wrong by 3–5×.** One 896×1216 z-image still
+> *with* `--low-ram` measured **27.5GB**. That is why `full` is now 64GB-only.
+>
+> It also means memory can't be managed by watching free RAM: MLX allocations
+> are invisible to `ps` (that 27.5GB job reported 4.9GB RSS). Instead each
+> worker **prices a job before claiming it** against a 90%-of-RAM budget, and
+> releases anything it can't afford back to the queue for a bigger Mac.
+>
+> Full story: [`docs/MEMORY-INCIDENT-2026-07-28.md`](docs/MEMORY-INCIDENT-2026-07-28.md).
+
+### Which Mac gets which job
+
+Automatic — nobody routes anything by hand:
+
+| Job | Price | 32GB Mac | 64GB Mac |
 |---|---|---|---|
-| **full** | no `--low-ram`, no tiling, `nice -5` | a Mac **dedicated** to rendering | fastest, peaks ~10–16GB |
-| **light** | `--low-ram --tile-frames 2`, `nice -15` | someone's **daily-driver** Mac | slower, peak stays low single-digit GB — Mac stays usable |
+| t2v 768×1280 f97 | 25GB | ✅ | ✅ |
+| 896×1216 still / `lora_i2v` | 30GB | ❌ | ✅ |
+| hero t2v 1080×1920 f97 | 49GB | ❌ | ✅ |
 
-So a laptop someone works on all day runs `light` and still chips in without
-lagging them; spare Macs run `full` and do the heavy lifting.
+A worker that can't afford a job logs `↩︎ released …` and puts it straight back
+for someone bigger. Force it with `./enqueue.sh --min-ram 64`.
 
-> Note: LTX has no literal "use only N GB" flag. `light` uses the real levers it
-> exposes (`--low-ram` + temporal tiling), which keep peak well under 16GB.
+> **🚩 Worth knowing:** on today's coefficients *all* 1080×1920 work lands on the
+> single 64GB Mac. The video price is **extrapolated, not measured** — it may be
+> too pessimistic. Run `./measure_peak.sh` on the 64GB Mac to get the real
+> number; if it's lower you get the other three Macs back for hero renders.
+
+### Changing limits across every Mac at once
+
+All memory limits live in **one file on the share**, `$FARM_ROOT/farm.conf`.
+Workers re-read it every poll, so an edit on the coordinator reaches the whole
+farm in ~15s — no restarts, nobody walking between desks:
+
+```bash
+vi /Volumes/RenderFarm/farm.conf     # e.g. VIDEO_GB_PER_MP after measuring
+./farm_status.sh                     # watch the BUDGET column move
+```
+
+Need one Mac to differ? Add `farm.conf.<hostname>` beside it with only the lines
+that change. Overriding in that Mac's `start_worker.command` also works, but it
+takes the machine out of farm-wide control — prefer the host file.
+
+📄 **Full detail: [`docs/OOM_LIMITS.md`](docs/OOM_LIMITS.md)** — budgets, the
+pricing model, what each log line means, and every tunable.
+
+### Changing limits across every Mac at once
+
+All memory limits live in **one file on the share**, `$FARM_ROOT/farm.conf`.
+Workers re-read it every poll, so an edit on the coordinator reaches the whole
+farm in ~15s — no restarts, nobody walking between desks:
+
+```bash
+vi /Volumes/RenderFarm/farm.conf     # e.g. MEM_BUDGET_PCT, or a measured coefficient
+./farm_status.sh                     # watch the BUDGET column move
+```
+
+Need one Mac to differ? Add `farm.conf.<hostname>` beside it with only the lines
+that change. Overriding in that Mac's `start_worker.command` also works, but it
+takes the machine out of farm-wide control — prefer the host file.
+
+📄 **Full detail: [`docs/OOM_LIMITS.md`](docs/OOM_LIMITS.md)** — the per-RAM
+budget table, what jetsam does, the five layers of protection, how to read
+`peak_mem_gb` out of the job sidecars, and every tunable.
 
 ---
 
@@ -296,7 +362,8 @@ heartbeat has gone stale.
 
 ## Requirements
 
-- Apple Silicon Macs (M1 or newer; built/tested on M4 Max, 36GB).
+- Apple Silicon Macs (M1 or newer). Current fleet: 3 × 32GB + 1 × 64GB.
+  **Under 32GB is not viable** for hero renders — see `docs/OOM_LIMITS.md`.
 - macOS with File Sharing (SMB) — built in.
 - A gigabit switch + ethernet to each Mac (WiFi works, just slower for file moves).
 - Per Mac: enough free disk for the models (~60GB) + renders.
@@ -311,12 +378,18 @@ heartbeat has gone stale.
 | `seed_farm_assets.sh` | **coordinator, once:** stage models+LoRAs onto the share |
 | `provision.command` | **each worker:** pull models+LoRAs from the share |
 | `MANIFEST.txt` | source of truth for which models + LoRAs everyone needs |
-| `start_worker.command` | double-click on each Mac to join the farm (set `PERF` here) |
-| `farm_worker.sh` | the claim-render-repeat loop (heartbeats, disk guard, one-job lock) |
+| `start_worker.command` | double-click on each Mac to join the farm |
+| `farm_worker.sh` | the claim-render-repeat loop (heartbeats, disk + RAM guards, one-job lock) |
+| `farm.conf` | **farm-wide limits — edit this one file on the share, every Mac follows** |
+| `farm_mem.sh` | RAM detection, the 90% budget, job pricing, OOM classification |
+| `measure_peak.sh` | measure the real memory curve on a Mac and print the coefficients to paste into `farm.conf` |
+| `farm_sitecustomize/` | applies the memory budget inside the render process; reports real peak |
 | `enqueue.sh` | add jobs / seed sweeps; `--priority high` to jump the queue |
 | `promote.sh` | promote cherry-picked test proofs to full hero renders |
-| `farm_status.sh` | counts, in-flight view, heartbeat-aware `--reap` for crashed jobs |
+| `farm_status.sh` | counts, in-flight view, per-worker memory, heartbeat-aware `--reap` |
 | `job.sample` | the job file format |
+| `docs/OOM_LIMITS.md` | how much memory a render may use, and what happens when it asks for more |
+| `docs/MEMORY-INCIDENT-2026-07-28.md` | the measured evidence behind those limits |
 | `FEATURELIST.md` | the roadmap / pickup list |
 
 ## How hard is this really?

@@ -15,3 +15,5 @@ FPS=24
 MODE="hero"               # hero = full video | test = quick z-image still to cherry-pick
 EXTRA=""                  # extra ltx-2-mlx flags, verbatim
 # PERF="light"            # optional per-job override (full | light). Omit to use the worker's default.
+# MIN_RAM_GB=64           # optional floor: only Macs with >= this much RAM may claim it.
+#                         # enqueue.sh --min-ram 64. Set automatically on a job that OOMs.

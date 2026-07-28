@@ -42,6 +42,8 @@ struct Config {
     ltx_dir: String,      // local LTX2-MLX checkout
     lora_dir: String,     // local LoRA dir (provision.command fills it)
     repo_dir: String,     // where the farm scripts live on this Mac ("" = autodetect)
+    role: String,         // "" (unasked) | "coordinator" | "worker"
+    wizard_done: bool,    // false -> the app opens the guided setup instead of the dashboard
 }
 
 fn home() -> String {
@@ -59,6 +61,8 @@ impl Default for Config {
             ltx_dir: String::new(),
             lora_dir: format!("{}/farm-loras", home()),
             repo_dir: String::new(),
+            role: String::new(),
+            wizard_done: false,
         }
     }
 }
@@ -983,8 +987,224 @@ fn run_action(action: String, cfg_state: State<CfgState>) -> Result<String, Stri
             }
             None => Err("Farm folder not found — set it in Settings.".into()),
         },
+        // The two long-running installers. Both are idempotent and both print a
+        // lot, so they go to Terminal rather than being swallowed by the app.
+        "run_setup" => open_script_in_terminal(&cfg, "setup.command"),
+        "run_provision" => open_script_in_terminal(&cfg, "provision.command"),
         other => Err(format!("unknown action: {}", other)),
     }
+}
+
+fn open_script_in_terminal(cfg: &Config, name: &str) -> Result<String, String> {
+    let dir = detect_repo(cfg).ok_or("Farm folder not found — set it in Settings.")?;
+    let script = format!("{}/{}", dir, name);
+    if !Path::new(&script).exists() {
+        return Err(format!("{} not found in {}", name, dir));
+    }
+    Command::new("open")
+        .arg("-a")
+        .arg("Terminal")
+        .arg(&script)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(format!("Running {} in Terminal — watch that window.", name))
+}
+
+// ---------------------------------------------------------------------------
+// Guided setup
+// ---------------------------------------------------------------------------
+
+// Find Macs already sharing over SMB, so a worker can PICK its coordinator
+// instead of being asked to type a hostname it has no way of knowing.
+// dns-sd browses forever by design, so run it briefly and take what it found.
+fn discover_smb_hosts() -> Vec<String> {
+    use std::io::Read;
+    use std::process::Stdio;
+
+    let mut child = match Command::new("/usr/bin/dns-sd")
+        .args(["-B", "_smb._tcp", "local."])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    std::thread::sleep(Duration::from_millis(2500));
+    let _ = child.kill();
+
+    let mut out = String::new();
+    if let Some(mut pipe) = child.stdout.take() {
+        let _ = pipe.read_to_string(&mut out);
+    }
+    let _ = child.wait();
+
+    let me = this_host().to_lowercase();
+    let mut seen = HashSet::new();
+    let mut hosts = Vec::new();
+    for line in out.lines() {
+        // ts  Add  flags  if  domain  _smb._tcp.  <instance name>
+        let f: Vec<&str> = line.split_whitespace().collect();
+        if f.len() < 7 || f[1] != "Add" {
+            continue;
+        }
+        let name = f[6..].join(" ");
+        if name.is_empty() || name.to_lowercase() == me {
+            continue; // don't offer this Mac as its own coordinator
+        }
+        if seen.insert(name.clone()) {
+            hosts.push(name);
+        }
+    }
+    hosts
+}
+
+#[tauri::command]
+fn discover_coordinators() -> Vec<String> {
+    discover_smb_hosts()
+}
+
+#[derive(Serialize)]
+struct SetupStep {
+    id: String,
+    title: String,
+    body: String,
+    done: bool,
+    detail: String,
+    action: String,
+    action_label: String,
+    manual: bool, // true = we can only open the pane; the human does the clicking
+}
+
+// The wizard's model of "where am I up to". Deliberately recomputed from the
+// real world on every call — never from a stored step number — so quitting
+// halfway, or doing a step by hand in Finder, both just work.
+#[tauri::command]
+fn setup_steps(cfg_state: State<CfgState>) -> serde_json::Value {
+    let cfg = cfg_state.0.lock().unwrap().clone();
+    let root = cfg.root();
+    let host = this_host();
+    let coord = cfg.role == "coordinator";
+    let mut steps: Vec<SetupStep> = Vec::new();
+
+    let push = |v: &mut Vec<SetupStep>,
+                id: &str,
+                title: &str,
+                body: &str,
+                done: bool,
+                detail: String,
+                action: &str,
+                action_label: &str,
+                manual: bool| {
+        v.push(SetupStep {
+            id: id.into(),
+            title: title.into(),
+            body: body.into(),
+            done,
+            detail,
+            action: action.into(),
+            action_label: action_label.into(),
+            manual,
+        });
+    };
+
+    if coord {
+        let folder = format!("{}/{}", home(), cfg.share_name.trim());
+        let has_folder = Path::new(&folder).is_dir();
+        push(&mut steps, "folder", "Create the shared folder",
+            "Every Mac reads jobs from one folder on this Mac. Make it first.",
+            has_folder,
+            if has_folder { format!("{} exists", folder) } else { format!("Will create {}", folder) },
+            "create_share_folder", "Create the folder", false);
+
+        // Advertised over SMB = File Sharing is on AND this folder is shared.
+        let shared = sh("sharing -l 2>/dev/null").to_lowercase()
+            .contains(&cfg.share_name.trim().to_lowercase())
+            || discover_smb_hosts().iter().any(|h| h.eq_ignore_ascii_case(&host));
+        push(&mut steps, "sharing", "Turn on File Sharing",
+            "System Settings → General → Sharing → File Sharing ON, then ⓘ → + → add the folder you just made.",
+            shared,
+            if shared { "This Mac is sharing over SMB".into() }
+                 else { "Not advertising a share yet".into() },
+            "open_sharing", "Open Sharing settings", true);
+
+        let has_dirs = Path::new(&root).join("queue").is_dir();
+        push(&mut steps, "dirs", "Create the queue folders",
+            "queue/, running/, done/, failed/, assets/ — the farm's inbox and outbox.",
+            has_dirs,
+            if has_dirs { format!("{}/queue ready", root) } else { format!("Will create them under {}", root) },
+            "create_dirs", "Create them", false);
+    } else {
+        let picked = !cfg.coordinator.trim().is_empty();
+        push(&mut steps, "pick", "Choose the coordinator Mac",
+            "The Mac holding the shared folder. Pick it from the list — no typing.",
+            picked,
+            if picked { format!("Coordinator: {}", cfg.coordinator) } else { "Nothing chosen yet".into() },
+            "", "", false);
+
+        let mounted = Path::new(&root).is_dir();
+        push(&mut steps, "mount", "Connect to the shared folder",
+            "Mounts the coordinator's folder on this Mac. Approve it in Finder if macOS asks.",
+            mounted,
+            if mounted { format!("Mounted at {}", root) } else { format!("Not mounted — {}", cfg.share_url()) },
+            "mount_share", "Connect", false);
+    }
+
+    // Both roles need the toolchain and the models.
+    let ltx = cfg.ltx();
+    let has_ltx = Path::new(&ltx).join(".venv/bin/ltx-2-mlx").exists();
+    push(&mut steps, "toolchain", "Install the render toolchain",
+        "Homebrew, uv, LTX2-MLX and mflux. 15–30 min, mostly unattended. Safe to re-run.",
+        has_ltx,
+        if has_ltx { format!("ltx-2-mlx built at {}", ltx) } else { "Not installed on this Mac yet".into() },
+        "run_setup", "Run setup", false);
+
+    let models = Path::new(&format!("{}/.cache/huggingface/hub", home())).is_dir()
+        && !list_dir_all(Path::new(&format!("{}/.cache/huggingface/hub", home())))
+            .iter().filter(|n| n.starts_with("models--")).collect::<Vec<_>>().is_empty();
+    push(&mut steps, "models", "Copy the models to this Mac",
+        "~60GB pulled off the share over the switch — far faster than HuggingFace.",
+        models,
+        if models { "Models present in the local HuggingFace cache".into() }
+             else { "No models cached locally yet".into() },
+        "run_provision", "Provision", false);
+
+    let done = steps.iter().all(|s| s.done);
+    serde_json::json!({
+        "host": host,
+        "role": cfg.role,
+        "root": root,
+        "share_url": cfg.share_url(),
+        "steps": steps,
+        "all_done": done,
+        "wizard_done": cfg.wizard_done,
+    })
+}
+
+// Pick coordinator-vs-worker. Sets the sensible default profile at the same
+// time: a coordinator is usually someone's actual Mac, so don't hand it 'full'.
+#[tauri::command]
+fn set_role(role: String, cfg_state: State<CfgState>) -> Result<(), String> {
+    let mut guard = cfg_state.0.lock().unwrap();
+    guard.role = role;
+    write_config(&guard)
+}
+
+#[tauri::command]
+fn set_coordinator(name: String, cfg_state: State<CfgState>) -> Result<(), String> {
+    let mut guard = cfg_state.0.lock().unwrap();
+    guard.coordinator = name;
+    if guard.share_path.trim().is_empty() {
+        guard.share_path = format!("/Volumes/{}", guard.share_name.trim());
+    }
+    write_config(&guard)
+}
+
+#[tauri::command]
+fn finish_wizard(cfg_state: State<CfgState>) -> Result<(), String> {
+    let mut guard = cfg_state.0.lock().unwrap();
+    guard.wizard_done = true;
+    write_config(&guard)
 }
 
 // ---------------------------------------------------------------------------
@@ -1142,7 +1362,12 @@ pub fn run() {
             save_config,
             verify_link,
             mount_share,
-            run_action
+            run_action,
+            setup_steps,
+            discover_coordinators,
+            set_role,
+            set_coordinator,
+            finish_wizard
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]

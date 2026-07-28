@@ -982,8 +982,21 @@ fn save_config(cfg: Config, cfg_state: State<CfgState>) -> Result<serde_json::Va
 #[tauri::command]
 fn mount_share(cfg_state: State<CfgState>) -> Result<String, String> {
     let cfg = cfg_state.0.lock().unwrap().clone();
+    do_mount(&cfg)
+}
+
+// Shared so run_action can dispatch it too. The UI used to special-case
+// mount_share and call it directly, which meant two ways to invoke one button
+// and no single list of valid actions to check against — --selftest flagged it.
+fn do_mount(cfg: &Config) -> Result<String, String> {
     if cfg.coordinator.trim().is_empty() {
         return Err("Set the coordinator Mac's name first.".into());
+    }
+    if cfg.role == "coordinator" {
+        return Err(format!(
+            "This Mac is the coordinator — it hosts {} locally, there is nothing to mount.",
+            cfg.local_root()
+        ));
     }
     let url = cfg.share_url();
     Command::new("open").arg(&url).spawn().map_err(|e| e.to_string())?;
@@ -1071,6 +1084,7 @@ fn run_action(action: String, cfg_state: State<CfgState>) -> Result<String, Stri
         "start_worker" => open_script_in_terminal(&cfg, "start_worker.command"),
         // The two long-running installers. Both are idempotent and both print a
         // lot, so they go to Terminal rather than being swallowed by the app.
+        "mount_share" => do_mount(&cfg),
         "run_setup" => open_script_in_terminal(&cfg, "setup.command"),
         "run_provision" => open_script_in_terminal(&cfg, "provision.command"),
         // Coordinator-only: push this Mac's models + LoRAs onto the share so
@@ -1078,6 +1092,45 @@ fn run_action(action: String, cfg_state: State<CfgState>) -> Result<String, Stri
         "seed_assets" => open_script_in_terminal(&cfg, "seed_farm_assets.sh"),
         other => Err(format!("unknown action: {}", other)),
     }
+}
+
+// Every action the UI is allowed to ask for. Kept as data so --selftest can
+// prove the wizard never references an action the backend doesn't handle —
+// a typo there is a dead button, and dead buttons is exactly how this went
+// wrong four times in a row.
+const KNOWN_ACTIONS: [&str; 12] = [
+    "open_network", "open_sharing", "open_farm", "open_repo", "open_github",
+    "create_share_folder", "create_dirs", "start_worker", "run_setup",
+    "run_provision", "seed_assets", "mount_share",
+];
+
+// The exact shell line the app hands to Terminal. Pure: no side effects, so
+// the self-test can assert on it.
+//
+// Two problems solved here at once.
+//   1. `open -a Terminal <script>` starts a fresh login shell and passes NO
+//      environment, so the script fell back to FARM_ROOT=/Volumes/RenderFarm.
+//      On a coordinator that's the wrong folder entirely.
+//   2. `open` on an unsigned, un-notarised .command launched BY AN APP trips
+//      Gatekeeper: "Apple could not verify … is free of malware", offering
+//      only Move to Bin. A wrapper written to /tmp hit the same wall.
+// Telling Terminal to `do script` runs a command STRING through the shell:
+// nothing is "opened", Gatekeeper isn't involved, and env prefixes inline.
+fn script_command(cfg: &Config, dir: &str, name: &str) -> String {
+    let lora_dir = if cfg.lora_dir.trim().is_empty() {
+        format!("{}/farm-loras", home())
+    } else {
+        cfg.lora_dir.trim().to_string()
+    };
+    format!(
+        "cd {dir} && FARM_ROOT={root} LTX_DIR={ltx} LORA_DIR={lora} COORDINATOR={coord} ./{name}",
+        dir = shell_quote(dir),
+        root = shell_quote(&cfg.root()),
+        ltx = shell_quote(&cfg.ltx()),
+        lora = shell_quote(&lora_dir),
+        coord = shell_quote(&safe_host(&cfg.coordinator)),
+        name = name,
+    )
 }
 
 fn open_script_in_terminal(cfg: &Config, name: &str) -> Result<String, String> {
@@ -1094,34 +1147,8 @@ fn open_script_in_terminal(cfg: &Config, name: &str) -> Result<String, String> {
         return Err(format!("{} not found in {}", name, dir));
     }
 
-    let lora_dir = if cfg.lora_dir.trim().is_empty() {
-        format!("{}/farm-loras", home())
-    } else {
-        cfg.lora_dir.trim().to_string()
-    };
 
-    // Two problems solved at once here.
-    //
-    // 1. `open -a Terminal <script>` starts a fresh login shell and passes NO
-    //    environment, so the script fell back to FARM_ROOT=/Volumes/RenderFarm.
-    //    On a coordinator that's the wrong folder entirely.
-    // 2. `open` on an unsigned, un-notarised .command launched BY AN APP trips
-    //    Gatekeeper: "Apple could not verify … is free of malware", with no way
-    //    through except Move to Bin. Writing our own wrapper to /tmp hit the
-    //    same wall.
-    //
-    // Telling Terminal to `do script` runs a COMMAND STRING through the shell.
-    // There's no file being "opened", so Gatekeeper isn't involved, and we get
-    // to prefix the environment inline. Same visible Terminal window either way.
-    let cmd = format!(
-        "cd {dir} && FARM_ROOT={root} LTX_DIR={ltx} LORA_DIR={lora} COORDINATOR={coord} ./{name}",
-        dir = shell_quote(&dir),
-        root = shell_quote(&cfg.root()),
-        ltx = shell_quote(&cfg.ltx()),
-        lora = shell_quote(&lora_dir),
-        coord = shell_quote(&safe_host(&cfg.coordinator)),
-        name = name,
-    );
+    let cmd = script_command(cfg, &dir, name);
     let script_line = applescript_escape(&cmd);
     let osa = format!(
         "tell application \"Terminal\"\n  activate\n  do script \"{}\"\nend tell",
@@ -1225,7 +1252,7 @@ fn discover_coordinators() -> Vec<String> {
     discover_smb_hosts()
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Default)]
 struct SetupStep {
     id: String,
     title: String,
@@ -1243,6 +1270,12 @@ struct SetupStep {
 #[tauri::command]
 fn setup_steps(cfg_state: State<CfgState>) -> serde_json::Value {
     let cfg = cfg_state.0.lock().unwrap().clone();
+    setup_steps_for(&cfg)
+}
+
+// Pure so --selftest can drive it for either role without Tauri state.
+fn setup_steps_for(cfg: &Config) -> serde_json::Value {
+    let cfg = cfg.clone();
     let root = cfg.root();
     let host = this_host();
     let coord = cfg.role == "coordinator";
@@ -1541,6 +1574,154 @@ fn spawn_watcher(app: AppHandle) {
 // ---------------------------------------------------------------------------
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+// ---------------------------------------------------------------------------
+// --selftest — exercise every wizard path headlessly.
+//
+// Written because four separate setup bugs (EACCES on /Volumes, the one-level
+// repo scan, the clobbered FARM_ROOT, the Gatekeeper block) all reached the
+// user first: each one only surfaces when a tray button is clicked, and the
+// tray can't be driven from a terminal. This checks the same code the buttons
+// run, for BOTH roles, without launching anything.
+// ---------------------------------------------------------------------------
+
+struct Report { pass: u32, fail: u32, warn: u32 }
+
+impl Report {
+    fn ok(&mut self, what: &str, detail: &str) {
+        self.pass += 1;
+        println!("  \x1b[32m✓\x1b[0m {:<44} {}", what, detail);
+    }
+    fn bad(&mut self, what: &str, detail: &str) {
+        self.fail += 1;
+        println!("  \x1b[31m✗\x1b[0m {:<44} {}", what, detail);
+    }
+    fn meh(&mut self, what: &str, detail: &str) {
+        self.warn += 1;
+        println!("  \x1b[33m!\x1b[0m {:<44} {}", what, detail);
+    }
+    fn check(&mut self, cond: bool, what: &str, detail: &str) {
+        if cond { self.ok(what, detail) } else { self.bad(what, detail) }
+    }
+}
+
+fn selftest_role(r: &mut Report, cfg: &Config, repo: Option<&String>) {
+    let role = cfg.role.clone();
+    println!("\n\x1b[1m── role: {} ──\x1b[0m", role);
+    let root = cfg.root();
+
+    // The EACCES bug: a coordinator must never resolve to the /Volumes mount point.
+    if role == "coordinator" {
+        r.check(!root.starts_with("/Volumes/"),
+            "root is local, not a mount point", &root);
+        // and it must actually be writable, which is the thing EACCES was about
+        let probe = Path::new(&root).join(".ltx_selftest_write");
+        match std::fs::create_dir_all(&root).and_then(|_| std::fs::write(&probe, b"x")) {
+            Ok(_) => { let _ = std::fs::remove_file(&probe); r.ok("farm root is writable", &root); }
+            Err(e) => r.bad("farm root is writable", &format!("{} — {}", root, e)),
+        }
+    } else {
+        r.check(root.starts_with("/Volumes/"),
+            "root is the mounted share", &root);
+    }
+
+    // Every step the wizard will render, and whether its button can work.
+    let steps = selftest_steps(cfg);
+    r.check(!steps.is_empty(), "wizard produced steps", &format!("{} steps", steps.len()));
+    for st in &steps {
+        if st.action.is_empty() { continue; }
+        // A wizard action the backend doesn't handle = a dead button.
+        r.check(KNOWN_ACTIONS.contains(&st.action.as_str()),
+            &format!("action wired: {}", st.action),
+            if KNOWN_ACTIONS.contains(&st.action.as_str()) { "handled" } else { "NOT HANDLED by run_action" });
+
+        // For the three that shell out, prove the script exists and the command
+        // we'd hand Terminal carries THIS role's config.
+        let script = match st.action.as_str() {
+            "run_setup" => Some("setup.command"),
+            "run_provision" => Some("provision.command"),
+            "seed_assets" => Some("seed_farm_assets.sh"),
+            "start_worker" => Some("start_worker.command"),
+            _ => None,
+        };
+        if let (Some(name), Some(dir)) = (script, repo) {
+            let path = format!("{}/{}", dir, name);
+            if !Path::new(&path).exists() {
+                r.bad(&format!("script present: {}", name), &path);
+                continue;
+            }
+            let cmd = script_command(cfg, dir, name);
+            let carries_root = cmd.contains(&format!("FARM_ROOT={}", shell_quote(&root)));
+            r.check(carries_root, &format!("{} gets this FARM_ROOT", name),
+                if carries_root { &root } else { "MISSING — script would use its own default" });
+            // and it must survive the trip into an AppleScript string literal
+            let esc = applescript_escape(&cmd);
+            r.check(!esc.contains('\u{0022}') || esc.contains("\\\""),
+                &format!("{} escapes for Terminal", name), "no bare quotes");
+            let syn = sh(&format!("bash -n {} 2>&1", shell_quote(&path)));
+            r.check(syn.trim().is_empty(), &format!("{} parses", name),
+                if syn.trim().is_empty() { "clean" } else { syn.trim() });
+        }
+    }
+}
+
+// setup_steps() minus the Tauri State wrapper, so the self-test can call it.
+fn selftest_steps(cfg: &Config) -> Vec<SetupStep> {
+    let v = setup_steps_for(cfg);
+    serde_json::from_value(v["steps"].clone()).unwrap_or_default()
+}
+
+pub fn selftest() -> i32 {
+    println!("\x1b[1mLTX Mac Farm — self test\x1b[0m");
+    let mut r = Report { pass: 0, fail: 0, warn: 0 };
+    let base = load_config();
+
+    println!("\n\x1b[1m── environment ──\x1b[0m");
+    println!("  host {}  ·  {}GB RAM", this_host(), sh("sysctl -n hw.memsize").trim().parse::<u64>().unwrap_or(0) / 1024/1024/1024);
+
+    let repo = detect_repo(&base);
+    match &repo {
+        Some(d) => r.ok("farm scripts found", d),
+        None => r.bad("farm scripts found", "detect_repo() returned nothing — every script button is dead"),
+    }
+
+    // Terminal must be drivable, or every shell-out button silently does nothing.
+    let osa = sh("osascript -e 'tell application \"System Events\" to return name of application \"Terminal\"' 2>&1");
+    r.check(!osa.to_lowercase().contains("not allowed") && !osa.to_lowercase().contains("error"),
+        "can drive Terminal via osascript", osa.trim());
+
+    let hosts = discover_smb_hosts();
+    if hosts.is_empty() {
+        r.meh("Bonjour finds another SMB host",
+            "none besides this Mac — fine on the coordinator, but a worker would have nothing to pick");
+    } else {
+        r.ok("Bonjour finds an SMB host", &hosts.join(", "));
+    }
+
+    // Both roles, regardless of how this Mac is currently configured.
+    for role in ["coordinator", "worker"] {
+        let mut c = base.clone();
+        c.role = role.to_string();
+        c.share_path = String::new();
+        if role == "worker" && c.coordinator.trim().is_empty() {
+            c.coordinator = "example-mac".into();
+        }
+        c.normalize();
+        selftest_role(&mut r, &c, repo.as_ref());
+    }
+
+    // The healing path for installs broken by the original EACCES bug.
+    println!("\n\x1b[1m── config repair ──\x1b[0m");
+    let mut broken = base.clone();
+    broken.role = "coordinator".into();
+    broken.share_path = "/Volumes/RenderFarm".into();
+    broken.normalize();
+    r.check(!broken.share_path.starts_with("/Volumes/"),
+        "heals a coordinator stuck on /Volumes", &broken.share_path);
+
+    println!("\n\x1b[1m{} passed · {} failed · {} warnings\x1b[0m", r.pass, r.fail, r.warn);
+    if r.fail == 0 { println!("\x1b[32mAll wizard paths are wired.\x1b[0m"); 0 } else { println!("\x1b[31mFix the ✗ rows above.\x1b[0m"); 1 }
+}
+
 pub fn run() {
     let cfg = load_config();
     let root = cfg.root();

@@ -396,9 +396,7 @@
           btn.disabled = true;
           btn.textContent = "Working…";
           try{
-            const msg = (s.action === "mount_share")
-              ? await invoke("mount_share")
-              : await invoke("run_action", { action: s.action });
+            const msg = await invoke("run_action", { action: s.action });
             toast(msg);
           }catch(e){ toast(String(e), true); }
           setTimeout(wizard, s.manual ? 400 : 1500);
@@ -507,9 +505,7 @@
 
   async function doAction(action){
     try{
-      const msg = (action === "mount_share")
-        ? await invoke("mount_share")
-        : await invoke("run_action", { action });
+      const msg = await invoke("run_action", { action });
       toast(msg);
       setTimeout(verify, 1200);
     }catch(e){ toast(String(e), true); }
